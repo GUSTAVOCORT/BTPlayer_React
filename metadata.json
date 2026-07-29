@@ -1,0 +1,8 @@
+{
+  "name": "BtPlayer",
+  "description": "Retro Neon & Nixie Clock Bluetooth Car Audio Player with audio visualizer, 5-band EQ, and custom color palettes.",
+  "requestFramePermissions": [],
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
+}

@@ -1,52 +1,54 @@
-name: Build Android APK
+name: Compilar APK de Android
 
 on:
   push:
-    branches: [ "principal", "main" ]
+    branches: [ "main", "principal", "master" ]
   workflow_dispatch:
 
 jobs:
   build:
     runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
 
-      - name: Setup Node.js
+    steps:
+      - name: Obtener código del repositorio
+        uses: actions/checkout@v4
+
+      - name: Configurar Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: 20
+          node-version: 22
 
-      - name: Install Dependencies
-        run: npm ci
-
-      - name: Install Capacitor
-        run: |
-          npm install @capacitor/core @capacitor/android
-          npm install -D @capacitor/cli
-
-      - name: Build React App
-        run: npm run build
-
-      - name: Add Android & Sync
-        run: |
-          npx cap init "BtPlayer" "com.carplayer.btplayer" --web-dir dist
-          npx cap add android
-          npx cap copy android
-
-      - name: Setup Java JDK
+      - name: Configurar Java JDK 21
         uses: actions/setup-java@v4
         with:
           distribution: 'zulu'
-          java-version: '17'
+          java-version: '21'
 
-      - name: Build APK with Gradle
+      - name: Instalar dependencias
+        run: npm install --legacy-peer-deps
+
+      - name: Compilar aplicación React (Vite)
+        run: npm run build
+
+      - name: Inicializar e Integrar Capacitor Android
+        run: |
+          npx cap add android || true
+          npx cap sync android
+
+      - name: Dar permisos de ejecución a Gradle
+        run: |
+          if [ -d "android" ]; then
+            cd android
+            chmod +x gradlew
+          fi
+
+      - name: Compilar APK de Android (Debug)
         run: |
           cd android
-          chmod +x gradlew
-          ./gradlew assembleDebug
+          ./gradlew assembleDebug --no-daemon
 
-      - name: Upload APK Artifact
+      - name: Subir APK como Artefacto Descargable
         uses: actions/upload-artifact@v4
         with:
-          name: BtPlayer-React-Debug.apk
+          name: BTPlayer-APK-Android
           path: android/app/build/outputs/apk/debug/app-debug.apk

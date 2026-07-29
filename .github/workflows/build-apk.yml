@@ -1,0 +1,52 @@
+name: Build Android APK
+
+on:
+  push:
+    branches: [ "principal", "main" ]
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Install Dependencies
+        run: npm ci
+
+      - name: Install Capacitor
+        run: |
+          npm install @capacitor/core @capacitor/android
+          npm install -D @capacitor/cli
+
+      - name: Build React App
+        run: npm run build
+
+      - name: Add Android & Sync
+        run: |
+          npx cap init "BtPlayer" "com.carplayer.btplayer" --web-dir dist
+          npx cap add android
+          npx cap copy android
+
+      - name: Setup Java JDK
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'zulu'
+          java-version: '17'
+
+      - name: Build APK with Gradle
+        run: |
+          cd android
+          chmod +x gradlew
+          ./gradlew assembleDebug
+
+      - name: Upload APK Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: BtPlayer-React-Debug.apk
+          path: android/app/build/outputs/apk/debug/app-debug.apk

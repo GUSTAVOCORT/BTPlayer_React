@@ -401,7 +401,15 @@ export const App: React.FC = () => {
                   max={playbackState.durationMs || 100}
                   value={currentPos}
                   onMouseDown={() => setUserSeeking(true)}
-                  onMouseUp={() => setUserSeeking(false)}
+                  onMouseUp={() => {
+                    setUserSeeking(false);
+                    audioEngine.seekToMs(seekProgress);
+                  }}
+                  onTouchStart={() => setUserSeeking(true)}
+                  onTouchEnd={() => {
+                    setUserSeeking(false);
+                    audioEngine.seekToMs(seekProgress);
+                  }}
                   onChange={(e) => setSeekProgress(parseInt(e.target.value))}
                   className="w-full h-2 rounded-lg accent-amber-400 cursor-pointer bg-neutral-800"
                   style={{ accentColor: prefs.accentColor }}

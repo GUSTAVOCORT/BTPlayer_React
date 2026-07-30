@@ -329,55 +329,94 @@ export const App: React.FC = () => {
         </div>
       ) : (
         /* SCREEN MODE 0 (Player) or MODE 2 (Mixed Player + Clock) */
-        <div className="relative z-10 flex-1 flex flex-col p-2 sm:p-4 md:p-6 landscape:p-2 landscape:px-3 overflow-hidden max-w-7xl mx-auto w-full min-h-0">
+        <div className="relative z-10 flex-1 flex flex-col pt-4 pb-3 px-3 sm:pt-6 sm:pb-4 sm:px-6 md:px-8 landscape:p-2 landscape:px-3 overflow-hidden max-w-7xl mx-auto w-full min-h-0">
           {/* Header Bar */}
-          <div className="flex items-center justify-between pb-1.5 sm:pb-3 mb-1.5 sm:mb-2 border-b border-neutral-800/80 gap-2 shrink-0">
-            <div className="flex items-center gap-2 truncate">
+          <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between pb-2 mb-2 sm:mb-3 border-b border-neutral-800/80 gap-2 shrink-0">
+            {/* Left: App Title & Bluetooth Device status */}
+            <div className="flex items-center gap-2.5 truncate">
               <img
                 src={altRockIcon}
                 alt="Rock Icon"
                 referrerPolicy="no-referrer"
-                className="w-7 h-7 sm:w-8 sm:h-8 rounded-lg object-cover border border-amber-400/60 shadow-[0_0_12px_rgba(251,191,36,0.35)] shrink-0 transition-transform hover:scale-105"
+                className="w-8 h-8 sm:w-9 sm:h-9 rounded-xl object-cover border border-amber-400/60 shadow-[0_0_12px_rgba(251,191,36,0.35)] shrink-0 transition-transform hover:scale-105"
               />
-              <div className="flex items-center gap-1.5 sm:gap-2 truncate">
-                <Bluetooth className="w-4 h-4 sm:w-5 sm:h-5 text-amber-400 animate-pulse shrink-0" />
-                <span
-                  className="font-tech text-xs sm:text-sm font-semibold text-neutral-300 truncate flex items-center gap-2"
-                  style={{
-                    textShadow: prefs.maskNeon
-                      ? `0 0 ${8 * textFlickerAlpha}px ${prefs.accentColor}`
-                      : 'none',
-                  }}
-                >
-                  {isMicActive ? (
-                    <span className="text-emerald-400 font-bold flex items-center gap-1.5 animate-pulse">
-                      <span className="w-2 h-2 rounded-full bg-emerald-400 animate-ping" />
-                      🎤 Reaccionando a Spotify / Deezer / Micrófono
-                    </span>
-                  ) : (
-                    playbackState.deviceName
-                  )}
+              <div className="flex flex-col min-w-0">
+                <div className="flex items-center gap-1.5 truncate">
+                  <Bluetooth className="w-4 h-4 text-amber-400 animate-pulse shrink-0" />
+                  <span
+                    className="font-tech text-xs sm:text-sm font-semibold text-neutral-200 truncate"
+                    style={{
+                      textShadow: prefs.maskNeon
+                        ? `0 0 ${8 * textFlickerAlpha}px ${prefs.accentColor}`
+                        : 'none',
+                    }}
+                  >
+                    {isMicActive ? (
+                      <span className="text-emerald-400 font-bold flex items-center gap-1.5 animate-pulse">
+                        <span className="w-2 h-2 rounded-full bg-emerald-400 animate-ping" />
+                        🎤 Reaccionando a Audio Externo
+                      </span>
+                    ) : (
+                      playbackState.deviceName
+                    )}
+                  </span>
+                </div>
+                <span className="font-orbitron text-[10px] text-amber-400/80 font-bold tracking-wider">
+                  BT PLAYER ROCK EDITION
                 </span>
               </div>
             </div>
 
-            <div className="flex items-center gap-1.5 sm:gap-2 shrink-0">
-              {/* Native Fullscreen Toggle */}
+            {/* Right: Accessible Control Toolbar Dock */}
+            <div className="flex items-center gap-1.5 sm:gap-2 flex-wrap bg-neutral-950/90 border border-neutral-800/90 p-1.5 sm:p-2 rounded-xl shadow-xl self-end sm:self-auto">
+              {/* Open Playlist Modal Button */}
               <button
-                onClick={toggleNativeFullscreen}
-                className="p-1.5 sm:p-2 rounded-lg bg-neutral-900 border border-neutral-800 text-neutral-300 hover:text-white hover:border-neutral-700 transition-colors"
-                title="Toggle Fullscreen"
+                onClick={() => setPlaylistOpen(true)}
+                className={`h-9 px-2.5 sm:px-3 rounded-lg border text-xs font-tech font-bold flex items-center gap-1.5 transition-all shadow-md active:scale-95 ${
+                  playlistOpen
+                    ? 'bg-amber-400 text-black border-amber-400 shadow-amber-400/20'
+                    : 'bg-neutral-900 border-neutral-800 text-neutral-200 hover:text-white hover:bg-neutral-800 hover:border-neutral-700'
+                }`}
+                title="Ver Lista de Reproducción"
               >
-                {isNativeFullscreen ? <Minimize2 className="w-3.5 h-3.5 sm:w-4 sm:h-4" /> : <Maximize2 className="w-3.5 h-3.5 sm:w-4 sm:h-4" />}
+                <ListMusic className="w-4 h-4" />
+                <span className="hidden xs:inline">Lista</span>
+                <span className="px-1.5 py-0.5 rounded-full bg-amber-400 text-black text-[10px] font-mono font-extrabold shadow-sm">
+                  {audioEngine.getPlaylist().length}
+                </span>
               </button>
 
-              {/* Microphone / External Audio Capture (Spotify, Deezer, Youtube, System) */}
+              {/* Load Custom Audio / Playlist Batch Button */}
+              <button
+                onClick={() => audioInputRef.current?.click()}
+                className="h-9 px-2.5 sm:px-3 rounded-lg bg-neutral-900 border border-neutral-800 text-neutral-200 hover:text-white hover:bg-neutral-800 hover:border-neutral-700 transition-all text-xs font-tech font-medium flex items-center gap-1.5 active:scale-95"
+                title="Cargar canciones o lista MP3"
+              >
+                <Upload className="w-4 h-4 text-amber-400" />
+                <span className="hidden sm:inline">Cargar MP3</span>
+              </button>
+
+              {/* Equalizer Toggle Button */}
+              <button
+                onClick={() => setEqVisible(!eqVisible)}
+                className={`h-9 px-2.5 sm:px-3 rounded-lg border text-xs font-tech font-bold flex items-center gap-1.5 transition-all active:scale-95 ${
+                  eqVisible
+                    ? 'bg-amber-400 text-black border-amber-400 shadow-amber-400/20'
+                    : 'bg-neutral-900 border-neutral-800 text-neutral-200 hover:text-white hover:bg-neutral-800 hover:border-neutral-700'
+                }`}
+                title="Ecualizador"
+              >
+                <SlidersHorizontal className="w-4 h-4" />
+                <span className="hidden sm:inline">EQ</span>
+              </button>
+
+              {/* Microphone / External Audio Capture */}
               <button
                 onClick={() => audioEngine.toggleMicCapture()}
-                className={`p-1.5 sm:p-2 rounded-lg border transition-all flex items-center gap-1 ${
+                className={`h-9 px-2.5 sm:px-3 rounded-lg border text-xs font-tech font-bold flex items-center gap-1.5 transition-all active:scale-95 ${
                   isMicActive
-                    ? 'bg-emerald-500 text-black border-emerald-400 font-bold shadow-[0_0_15px_rgba(16,185,129,0.5)] animate-pulse'
-                    : 'bg-neutral-900 border-neutral-800 text-neutral-300 hover:text-white hover:border-neutral-700'
+                    ? 'bg-emerald-500 text-black border-emerald-400 shadow-[0_0_15px_rgba(16,185,129,0.5)] animate-pulse'
+                    : 'bg-neutral-900 border-neutral-800 text-neutral-200 hover:text-white hover:bg-neutral-800 hover:border-neutral-700'
                 }`}
                 title={
                   isMicActive
@@ -385,32 +424,8 @@ export const App: React.FC = () => {
                     : 'Activar captura de Micrófono / Audio Externo para Spotify, Deezer o YouTube'
                 }
               >
-                {isMicActive ? <Mic className="w-3.5 h-3.5 sm:w-4 sm:h-4 text-black" /> : <MicOff className="w-3.5 h-3.5 sm:w-4 sm:h-4" />}
-              </button>
-
-              {/* Load Custom Audio / Playlist Batch Button */}
-              <button
-                onClick={() => audioInputRef.current?.click()}
-                className="p-1.5 sm:p-2 rounded-lg bg-neutral-900 border border-neutral-800 text-neutral-300 hover:text-white hover:border-neutral-700 transition-colors"
-                title="Cargar lista o canciones MP3"
-              >
-                <Upload className="w-3.5 h-3.5 sm:w-4 sm:h-4" />
-              </button>
-
-              {/* Open Playlist Modal Button */}
-              <button
-                onClick={() => setPlaylistOpen(true)}
-                className={`p-1.5 sm:p-2 rounded-lg border transition-colors relative ${
-                  playlistOpen
-                    ? 'bg-amber-400 text-black border-amber-400 font-bold'
-                    : 'bg-neutral-900 border-neutral-800 text-neutral-300 hover:text-white'
-                }`}
-                title="Ver lista de reproducción"
-              >
-                <ListMusic className="w-3.5 h-3.5 sm:w-4 sm:h-4" />
-                <span className="absolute -top-1 -right-1 w-3.5 h-3.5 rounded-full bg-amber-400 text-black text-[9px] font-bold flex items-center justify-center font-mono">
-                  {audioEngine.getPlaylist().length}
-                </span>
+                {isMicActive ? <Mic className="w-4 h-4 text-black" /> : <MicOff className="w-4 h-4 text-emerald-400" />}
+                <span className="hidden md:inline">Mic / Spotify</span>
               </button>
 
               {/* Mode Toggle Button */}
@@ -421,32 +436,30 @@ export const App: React.FC = () => {
                     screenMode: (prev.screenMode + 1) % 3,
                   }))
                 }
-                className="p-1.5 sm:p-2 rounded-lg bg-neutral-900 border border-neutral-800 text-neutral-300 hover:text-white hover:border-neutral-700 transition-colors"
-                title="Toggle Screen Mode (Player / Clock / Mixed)"
+                className="h-9 px-2.5 sm:px-3 rounded-lg bg-neutral-900 border border-neutral-800 text-neutral-200 hover:text-white hover:bg-neutral-800 hover:border-neutral-700 transition-all text-xs font-tech font-medium flex items-center gap-1.5 active:scale-95"
+                title="Cambiar Modo de Pantalla (Reproductor / Reloj Nixie / Mixto)"
               >
-                <Clock className="w-3.5 h-3.5 sm:w-4 sm:h-4" />
-              </button>
-
-              {/* Equalizer Toggle Button */}
-              <button
-                onClick={() => setEqVisible(!eqVisible)}
-                className={`p-1.5 sm:p-2 rounded-lg border transition-colors ${
-                  eqVisible
-                    ? 'bg-amber-400 text-black border-amber-400 font-bold'
-                    : 'bg-neutral-900 border-neutral-800 text-neutral-300 hover:text-white'
-                }`}
-                title="Equalizer"
-              >
-                <SlidersHorizontal className="w-3.5 h-3.5 sm:w-4 sm:h-4" />
+                <Clock className="w-4 h-4 text-amber-400" />
+                <span className="hidden md:inline">Modo</span>
               </button>
 
               {/* Settings Button */}
               <button
                 onClick={() => setSettingsOpen(true)}
-                className="p-1.5 sm:p-2 rounded-lg bg-neutral-900 border border-neutral-800 text-neutral-300 hover:text-white hover:border-neutral-700 transition-colors"
-                title="Settings"
+                className="h-9 px-2.5 sm:px-3 rounded-lg bg-neutral-900 border border-neutral-800 text-neutral-200 hover:text-white hover:bg-neutral-800 hover:border-neutral-700 transition-all text-xs font-tech font-medium flex items-center gap-1.5 active:scale-95"
+                title="Ajustes de pantalla y estilos"
               >
-                <SettingsIcon className="w-3.5 h-3.5 sm:w-4 sm:h-4" />
+                <SettingsIcon className="w-4 h-4 text-amber-400" />
+                <span className="hidden md:inline">Ajustes</span>
+              </button>
+
+              {/* Native Fullscreen Toggle */}
+              <button
+                onClick={toggleNativeFullscreen}
+                className="h-9 w-9 rounded-lg bg-neutral-900 border border-neutral-800 text-neutral-200 hover:text-white hover:bg-neutral-800 hover:border-neutral-700 transition-all flex items-center justify-center shrink-0 active:scale-95"
+                title="Pantalla Completa"
+              >
+                {isNativeFullscreen ? <Minimize2 className="w-4 h-4" /> : <Maximize2 className="w-4 h-4" />}
               </button>
             </div>
           </div>

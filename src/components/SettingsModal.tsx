@@ -28,6 +28,19 @@ const STYLES = [
   'Barras centro',
   'Llamas',
   'Ondas latido',
+  'Ondas 3D',
+  'Túnel Cyberpunk',
+  'Lámpara de Lava',
+  'Bobina de Tesla',
+  'Efecto TRON',
+  'Radio Viejo',
+  'Bola de Plasma',
+  'Anillo Neón Pulsante',
+  'Cintas Concentricas',
+  'Malla de Puntos 3D',
+  'Haz de Energía Cósmica',
+  'Bola de Discoteca 80s',
+  'Show de Rayos Láser',
 ];
 
 const BAR_COUNTS = [20, 28, 40, 56, 72];
@@ -52,12 +65,12 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-sm p-4 overflow-y-auto">
-      <div className="relative w-full max-w-xl bg-neutral-900 border border-neutral-800 rounded-2xl shadow-2xl flex flex-col max-h-[90vh] text-white">
+      <div className="relative w-full max-w-2xl bg-neutral-900 border border-neutral-800 rounded-2xl shadow-2xl flex flex-col max-h-[90vh] text-white">
         {/* Header */}
         <div className="flex items-center justify-between p-4 border-b border-neutral-800">
           <div className="flex items-center gap-2">
             <Sliders className="w-5 h-5 text-amber-400" />
-            <h2 className="font-orbitron text-lg font-bold text-amber-400">Ajustes</h2>
+            <h2 className="font-orbitron text-lg font-bold text-amber-400">Ajustes del Reproductor</h2>
           </div>
           <button
             onClick={onClose}
@@ -71,20 +84,34 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
         <div className="flex-1 overflow-y-auto p-5 space-y-6 text-sm">
           {/* Estilo de barras */}
           <div>
-            <h3 className="text-amber-400 font-bold mb-2 flex items-center gap-1.5 font-orbitron">
-              <Sparkles className="w-4 h-4" /> Estilo de barras
-            </h3>
-            <div className="flex gap-2 overflow-x-auto pb-2 no-scrollbar">
+            <div className="flex items-center justify-between mb-2">
+              <h3 className="text-amber-400 font-bold flex items-center gap-1.5 font-orbitron">
+                <Sparkles className="w-4 h-4" /> Estilo de Visualizador ({STYLES.length} opciones)
+              </h3>
+              <select
+                value={prefs.vizStyle % STYLES.length}
+                onChange={(e) => updateField('vizStyle', parseInt(e.target.value))}
+                className="bg-neutral-800 text-amber-300 text-xs font-tech px-2 py-1 rounded border border-neutral-700 outline-none focus:border-amber-400"
+              >
+                {STYLES.map((name, i) => (
+                  <option key={name} value={i}>
+                    {i + 1}. {name}
+                  </option>
+                ))}
+              </select>
+            </div>
+            <div className="flex flex-wrap gap-1.5 max-h-56 overflow-y-auto p-2.5 bg-neutral-950/70 border border-neutral-800/80 rounded-xl">
               {STYLES.map((name, i) => (
                 <button
                   key={name}
                   onClick={() => updateField('vizStyle', i)}
-                  className={`px-3 py-1.5 rounded-lg text-xs font-tech whitespace-nowrap transition-colors ${
+                  className={`px-2.5 py-1.5 rounded-lg text-xs font-tech transition-all flex items-center gap-1.5 ${
                     prefs.vizStyle === i
-                      ? 'bg-amber-400 text-black font-bold shadow-lg'
-                      : 'bg-neutral-800 text-neutral-300 hover:bg-neutral-700'
+                      ? 'bg-amber-400 text-black font-bold shadow-md shadow-amber-400/20 scale-[1.02]'
+                      : 'bg-neutral-800/90 text-neutral-300 hover:bg-neutral-700 hover:text-white'
                   }`}
                 >
+                  <span className="text-[10px] opacity-60 font-mono">#{i + 1}</span>
                   {name}
                 </button>
               ))}
@@ -93,10 +120,27 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
 
           {/* Paleta de colores */}
           <div>
-            <h3 className="text-amber-400 font-bold mb-2 flex items-center gap-1.5 font-orbitron">
-              <Palette className="w-4 h-4" /> Color / paleta
-            </h3>
-            <div className="flex gap-2 overflow-x-auto pb-2 no-scrollbar">
+            <div className="flex items-center justify-between mb-2">
+              <h3 className="text-amber-400 font-bold flex items-center gap-1.5 font-orbitron">
+                <Palette className="w-4 h-4" /> Paletas de Color ({PALETTES.length} paletas)
+              </h3>
+              <select
+                value={prefs.vizPalette % PALETTES.length}
+                onChange={(e) => {
+                  const idx = parseInt(e.target.value);
+                  updateField('vizPalette', idx);
+                  updateField('accentColor', PALETTES[idx].colors[0]);
+                }}
+                className="bg-neutral-800 text-amber-300 text-xs font-tech px-2 py-1 rounded border border-neutral-700 outline-none focus:border-amber-400"
+              >
+                {PALETTES.map((pal, i) => (
+                  <option key={pal.name} value={i}>
+                    {i + 1}. {pal.name}
+                  </option>
+                ))}
+              </select>
+            </div>
+            <div className="flex flex-wrap gap-1.5 max-h-52 overflow-y-auto p-2.5 bg-neutral-950/70 border border-neutral-800/80 rounded-xl">
               {PALETTES.map((pal, i) => (
                 <button
                   key={pal.name}
@@ -104,16 +148,21 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                     updateField('vizPalette', i);
                     updateField('accentColor', pal.colors[0]);
                   }}
-                  className={`px-3 py-1.5 rounded-lg text-xs font-tech whitespace-nowrap flex items-center gap-2 transition-colors ${
+                  className={`px-2.5 py-1.5 rounded-lg text-xs font-tech flex items-center gap-2 transition-all ${
                     prefs.vizPalette === i
-                      ? 'bg-amber-400 text-black font-bold shadow-lg'
-                      : 'bg-neutral-800 text-neutral-300 hover:bg-neutral-700'
+                      ? 'bg-amber-400 text-black font-bold shadow-md shadow-amber-400/20 scale-[1.02]'
+                      : 'bg-neutral-800/90 text-neutral-300 hover:bg-neutral-700 hover:text-white'
                   }`}
                 >
-                  <span
-                    className="w-3 h-3 rounded-full border border-white/20"
-                    style={{ backgroundColor: pal.colors[0] }}
-                  />
+                  <div className="flex -space-x-1 shrink-0">
+                    {pal.colors.slice(0, 3).map((c, cIdx) => (
+                      <span
+                        key={cIdx}
+                        className="w-3 h-3 rounded-full border border-black/40 shadow-sm"
+                        style={{ backgroundColor: c }}
+                      />
+                    ))}
+                  </div>
                   {pal.name}
                 </button>
               ))}
@@ -316,6 +365,22 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                 />
               </div>
             )}
+          </div>
+
+          {/* Cambios Automáticos */}
+          <div>
+            <h3 className="text-amber-400 font-bold mb-2 flex items-center gap-1.5 font-orbitron">
+              <Sparkles className="w-4 h-4" /> Autocambio Visual
+            </h3>
+            <label className="flex items-center gap-2 cursor-pointer bg-neutral-800/60 p-2.5 rounded-lg hover:bg-neutral-800">
+              <input
+                type="checkbox"
+                checked={prefs.autoThemeOnChange ?? true}
+                onChange={(e) => updateField('autoThemeOnChange', e.target.checked)}
+                className="accent-amber-400 w-4 h-4"
+              />
+              <span className="text-neutral-200">Cambiar estilo visual y colores automáticamente al cambiar de canción</span>
+            </label>
           </div>
 
           {/* Diagnóstico */}

@@ -52,6 +52,9 @@ class AudioEngine {
   private synthTimer: ReturnType<typeof setInterval> | null = null;
   private eqBands: BiquadFilterNode[] = [];
   private currentGainNode: GainNode | null = null;
+  private micStream: MediaStream | null = null;
+  private micSourceNode: MediaStreamAudioSourceNode | null = null;
+  private isMicActive = false;
 
   constructor() {
     // Lazy initialization on user interaction
@@ -302,74 +305,8 @@ class AudioEngine {
 
   private startSynthEngine() {
     this.stopSynthEngine();
-    if (!this.audioCtx) return;
-
-    let step = 0;
-    const targetNode = this.eqBands[0] || this.analyser || this.audioCtx.destination;
-
-    // 80s Synthwave scale frequencies (A minor / C major synth wave)
-    const bassNotes = [110, 110, 130.81, 146.83, 110, 98, 130.81, 164.81]; // A2, C3, D3...
-    const leadNotes = [440, 523.25, 659.25, 587.33, 523.25, 440, 392, 440]; // A4, C5, E5...
-
-    this.synthTimer = setInterval(() => {
-      if (!this.isPlaying || !this.audioCtx) return;
-
-      try {
-        const now = this.audioCtx.currentTime;
-
-        // 1. Bassline synth
-        const bassOsc = this.audioCtx.createOscillator();
-        const bassGain = this.audioCtx.createGain();
-        bassOsc.type = 'sawtooth';
-        const bFreq = bassNotes[(step + this.currentTrackIndex * 2) % bassNotes.length];
-        bassOsc.frequency.setValueAtTime(bFreq, now);
-
-        bassGain.gain.setValueAtTime(0.2, now);
-        bassGain.gain.exponentialRampToValueAtTime(0.005, now + 0.18);
-
-        bassOsc.connect(bassGain);
-        bassGain.connect(targetNode);
-        bassOsc.start(now);
-        bassOsc.stop(now + 0.19);
-
-        // 2. Lead melody synth (every 2 steps)
-        if (step % 2 === 0) {
-          const leadOsc = this.audioCtx.createOscillator();
-          const leadGain = this.audioCtx.createGain();
-          leadOsc.type = 'square';
-          const lFreq = leadNotes[(Math.floor(step / 2) + this.currentTrackIndex) % leadNotes.length];
-          leadOsc.frequency.setValueAtTime(lFreq, now);
-
-          leadGain.gain.setValueAtTime(0.12, now);
-          leadGain.gain.exponentialRampToValueAtTime(0.001, now + 0.35);
-
-          leadOsc.connect(leadGain);
-          leadGain.connect(targetNode);
-          leadOsc.start(now);
-          leadOsc.stop(now + 0.36);
-        }
-
-        // 3. Neon Kick drum (every 4 steps)
-        if (step % 4 === 0) {
-          const kickOsc = this.audioCtx.createOscillator();
-          const kickGain = this.audioCtx.createGain();
-          kickOsc.frequency.setValueAtTime(150, now);
-          kickOsc.frequency.exponentialRampToValueAtTime(30, now + 0.1);
-
-          kickGain.gain.setValueAtTime(0.35, now);
-          kickGain.gain.exponentialRampToValueAtTime(0.001, now + 0.12);
-
-          kickOsc.connect(kickGain);
-          kickGain.connect(targetNode);
-          kickOsc.start(now);
-          kickOsc.stop(now + 0.13);
-        }
-
-        step++;
-      } catch (_e) {
-        // ignore timing glitches
-      }
-    }, 180);
+    // Audible synth audio disabled per user request to eliminate default beep tones.
+    // Visualizer simulation handles FFT data silently in getFFTData().
   }
 
   private stopSynthEngine() {
@@ -391,24 +328,113 @@ class AudioEngine {
   }
 
   public isCurrentlyPlaying(): boolean {
-    return this.isPlaying;
+    return this.isPlaying || this.isMicActive;
+  }
+
+  public isMicrophoneActive(): boolean {
+    return this.isMicActive;
+  }
+
+  public async startMicCapture(): Promise<boolean> {
+    this.initAudio();
+    if (!this.audioCtx) return false;
+
+    try {
+      if (this.isMicActive) return true;
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      this.micStream = stream;
+      this.micSourceNode = this.audioCtx.createMediaStreamSource(stream);
+
+      if (this.eqBands.length > 0) {
+        this.micSourceNode.connect(this.eqBands[0]);
+      } else if (this.analyser) {
+        this.micSourceNode.connect(this.analyser);
+      }
+
+      this.isMicActive = true;
+      this.isPlaying = true;
+      this.notify();
+      return true;
+    } catch (e) {
+      console.warn('Microphone permission denied or error:', e);
+      this.isMicActive = false;
+      this.notify();
+      return false;
+    }
+  }
+
+  public stopMicCapture() {
+    if (this.micSourceNode) {
+      try {
+        this.micSourceNode.disconnect();
+      } catch (_e) {}
+      this.micSourceNode = null;
+    }
+    if (this.micStream) {
+      this.micStream.getTracks().forEach((track) => track.stop());
+      this.micStream = null;
+    }
+    this.isMicActive = false;
+    this.notify();
+  }
+
+  public async toggleMicCapture(): Promise<boolean> {
+    if (this.isMicActive) {
+      this.stopMicCapture();
+      return false;
+    } else {
+      return await this.startMicCapture();
+    }
   }
 
   public loadCustomTrack(title: string, artist: string, album: string, url: string) {
+    this.loadCustomTracks([{ title, artist, album, url }]);
+  }
+
+  public loadCustomTracks(tracks: Array<{ title: string; artist: string; album: string; url: string }>) {
+    if (!tracks || tracks.length === 0) return;
     this.stopAudioAndSynth();
-    const customTrack: TrackItem = {
-      id: 'custom_' + Date.now(),
-      title,
-      artist,
-      album,
+
+    const newTrackItems: TrackItem[] = tracks.map((t, idx) => ({
+      id: 'custom_' + Date.now() + '_' + idx,
+      title: t.title,
+      artist: t.artist || 'Archivo Local',
+      album: t.album || 'Mi Música',
       durationMs: 180000,
-      url,
+      url: t.url,
       isSynth: false,
-    };
-    SAMPLE_TRACKS.unshift(customTrack);
+    }));
+
+    SAMPLE_TRACKS.unshift(...newTrackItems);
     this.currentTrackIndex = 0;
     this.resetTimer();
     this.play();
+  }
+
+  public getPlaylist(): TrackItem[] {
+    return SAMPLE_TRACKS;
+  }
+
+  public getCurrentTrackIndex(): number {
+    return this.currentTrackIndex;
+  }
+
+  public playTrackIndex(index: number) {
+    if (index < 0 || index >= SAMPLE_TRACKS.length) return;
+    this.stopAudioAndSynth();
+    this.currentTrackIndex = index;
+    this.resetTimer();
+    this.play();
+  }
+
+  public removeTrack(index: number) {
+    if (index < 0 || index >= SAMPLE_TRACKS.length) return;
+    if (SAMPLE_TRACKS.length <= 1) return; // Keep at least one track
+    SAMPLE_TRACKS.splice(index, 1);
+    if (this.currentTrackIndex >= SAMPLE_TRACKS.length) {
+      this.currentTrackIndex = 0;
+    }
+    this.notify();
   }
 }
 

@@ -1,13 +1,15 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { AppPrefs, PlaybackState } from './types';
-import { getAccentColor } from './utils/palettes';
+import { getAccentColor, getPalette, PALETTES } from './utils/palettes';
 import { generateCoverArt } from './utils/coverArt';
+import altRockIcon from './assets/images/alt_rock_icon_1785373882131.jpg';
 import { audioEngine } from './components/AudioEngine';
 import { NixieClock } from './components/NixieClock';
 import { NeonFrame } from './components/NeonFrame';
 import { VisualizerView } from './components/VisualizerView';
 import { EqualizerPanel } from './components/EqualizerPanel';
 import { SettingsModal } from './components/SettingsModal';
+import { PlaylistModal } from './components/PlaylistModal';
 import {
   Play,
   Pause,
@@ -18,8 +20,12 @@ import {
   Bluetooth,
   Clock,
   Music,
+  ListMusic,
   Maximize2,
+  Minimize2,
   Upload,
+  Mic,
+  MicOff,
 } from 'lucide-react';
 
 const DEFAULT_PREFS: AppPrefs = {
@@ -44,6 +50,7 @@ const DEFAULT_PREFS: AppPrefs = {
   nixieGlow: true,
   nixie24h: false,
   showDebug: false,
+  autoThemeOnChange: true,
 };
 
 export const App: React.FC = () => {
@@ -71,6 +78,9 @@ export const App: React.FC = () => {
 
   const [eqVisible, setEqVisible] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const [playlistOpen, setPlaylistOpen] = useState(false);
+  const [isNativeFullscreen, setIsNativeFullscreen] = useState(false);
+  const [isMicActive, setIsMicActive] = useState(false);
   const [coverArtUrl, setCoverArtUrl] = useState<string>(() =>
     generateCoverArt(300, 'Midnight Synth Drive', DEFAULT_PREFS.coverStyle, DEFAULT_PREFS.accentColor)
   );
@@ -80,6 +90,25 @@ export const App: React.FC = () => {
 
   const bgInputRef = useRef<HTMLInputElement | null>(null);
   const audioInputRef = useRef<HTMLInputElement | null>(null);
+
+  // Toggle browser native full screen mode for phone car mount
+  const toggleNativeFullscreen = () => {
+    if (!document.fullscreenElement) {
+      document.documentElement.requestFullscreen().then(() => setIsNativeFullscreen(true)).catch(() => {});
+    } else {
+      if (document.exitFullscreen) {
+        document.exitFullscreen().then(() => setIsNativeFullscreen(false)).catch(() => {});
+      }
+    }
+  };
+
+  useEffect(() => {
+    const handleFsChange = () => {
+      setIsNativeFullscreen(!!document.fullscreenElement);
+    };
+    document.addEventListener('fullscreenchange', handleFsChange);
+    return () => document.removeEventListener('fullscreenchange', handleFsChange);
+  }, []);
 
   // Save preferences
   useEffect(() => {
@@ -95,6 +124,7 @@ export const App: React.FC = () => {
     const unsub = audioEngine.subscribe(() => {
       const track = audioEngine.getCurrentTrack();
       const playing = audioEngine.isCurrentlyPlaying();
+      setIsMicActive(audioEngine.isMicrophoneActive());
       setPlaybackState((prev) => ({
         ...prev,
         title: track.title,
@@ -118,6 +148,28 @@ export const App: React.FC = () => {
       clearInterval(interval);
     };
   }, []);
+
+  // Auto change visual style and color palette on song change
+  const prevTitleRef = useRef(playbackState.title);
+  useEffect(() => {
+    if (prevTitleRef.current !== playbackState.title) {
+      prevTitleRef.current = playbackState.title;
+
+      if (prefs.autoThemeOnChange !== false) {
+        setPrefs((prev) => {
+          const nextStyle = (prev.vizStyle + 1) % 29;
+          const nextPalIndex = (prev.vizPalette + 1) % PALETTES.length;
+          const pal = getPalette(nextPalIndex);
+          return {
+            ...prev,
+            vizStyle: nextStyle,
+            vizPalette: nextPalIndex,
+            accentColor: pal.colors[0],
+          };
+        });
+      }
+    }
+  }, [playbackState.title, prefs.autoThemeOnChange]);
 
   // Update Cover Art when track or coverStyle or accentColor changes
   useEffect(() => {
@@ -188,11 +240,22 @@ export const App: React.FC = () => {
   };
 
   const handleAudioFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (file) {
-      const url = URL.createObjectURL(file);
-      const title = file.name.replace(/\.[^/.]+$/, '');
-      audioEngine.loadCustomTrack(title, 'Local File', 'My Library', url);
+    const files = e.target.files;
+    if (files && files.length > 0) {
+      const tracksToLoad = Array.from(files).map((file) => {
+        const url = URL.createObjectURL(file);
+        const title = file.name.replace(/\.[^/.]+$/, '');
+        return {
+          title,
+          artist: 'Archivo Local',
+          album: 'Mi Lista',
+          url,
+        };
+      });
+
+      audioEngine.loadCustomTracks(tracksToLoad);
+      // Reset input value so same files can be re-uploaded if desired
+      if (audioInputRef.current) audioInputRef.current.value = '';
     }
   };
 
@@ -200,7 +263,7 @@ export const App: React.FC = () => {
   const progressPercent = playbackState.durationMs > 0 ? (currentPos / playbackState.durationMs) * 100 : 0;
 
   return (
-    <div className="relative w-screen h-screen bg-black text-white font-sans overflow-hidden flex flex-col select-none">
+    <div className="relative w-full h-[100dvh] min-h-[100dvh] max-h-[100dvh] bg-black text-white font-sans overflow-hidden flex flex-col select-none">
       {/* Outer Neon Frame */}
       <NeonFrame
         neonColor={prefs.accentColor}
@@ -232,7 +295,8 @@ export const App: React.FC = () => {
       <input
         ref={audioInputRef}
         type="file"
-        accept="audio/*"
+        accept="audio/*,.mp3,.wav,.ogg,.m4a,.flac,.aac"
+        multiple
         className="hidden"
         onChange={handleAudioFileSelect}
       />
@@ -242,7 +306,7 @@ export const App: React.FC = () => {
       {prefs.screenMode === 1 ? (
         <div
           onClick={() => updatePrefs((prev) => ({ ...prev, screenMode: 0 }))}
-          className="relative z-10 w-full h-full flex flex-col items-center justify-center p-8 cursor-pointer group"
+          className="relative z-10 w-full h-full flex flex-col items-center justify-center p-4 sm:p-8 cursor-pointer group"
           title="Click to return to player view"
         >
           <div className="w-full max-w-4xl h-[65vh]">
@@ -250,7 +314,7 @@ export const App: React.FC = () => {
           </div>
 
           <div
-            className="mt-6 font-tech text-sm tracking-widest text-neutral-400 group-hover:text-amber-400 transition-colors"
+            className="mt-4 sm:mt-6 font-tech text-xs sm:text-sm tracking-widest text-neutral-400 group-hover:text-amber-400 transition-colors"
             style={{
               textShadow: prefs.maskNeon
                 ? `0 0 ${12 * textFlickerAlpha}px ${prefs.accentColor}`
@@ -259,37 +323,94 @@ export const App: React.FC = () => {
           >
             ♪ {playbackState.title} — {playbackState.artist}
           </div>
-          <span className="text-xs text-neutral-500 mt-2 font-tech">
+          <span className="text-[10px] sm:text-xs text-neutral-500 mt-2 font-tech">
             (Tap screen to return to player)
           </span>
         </div>
       ) : (
         /* SCREEN MODE 0 (Player) or MODE 2 (Mixed Player + Clock) */
-        <div className="relative z-10 flex-1 flex flex-col p-4 md:p-6 overflow-hidden max-w-7xl mx-auto w-full">
+        <div className="relative z-10 flex-1 flex flex-col p-2 sm:p-4 md:p-6 landscape:p-2 landscape:px-3 overflow-hidden max-w-7xl mx-auto w-full min-h-0">
           {/* Header Bar */}
-          <div className="flex items-center justify-between pb-3 mb-2 border-b border-neutral-800/80">
-            <div className="flex items-center gap-2">
-              <Bluetooth className="w-5 h-5 text-amber-400 animate-pulse" />
-              <span
-                className="font-tech text-xs md:text-sm font-semibold text-neutral-300"
-                style={{
-                  textShadow: prefs.maskNeon
-                    ? `0 0 ${8 * textFlickerAlpha}px ${prefs.accentColor}`
-                    : 'none',
-                }}
-              >
-                {playbackState.deviceName}
-              </span>
+          <div className="flex items-center justify-between pb-1.5 sm:pb-3 mb-1.5 sm:mb-2 border-b border-neutral-800/80 gap-2 shrink-0">
+            <div className="flex items-center gap-2 truncate">
+              <img
+                src={altRockIcon}
+                alt="Rock Icon"
+                referrerPolicy="no-referrer"
+                className="w-7 h-7 sm:w-8 sm:h-8 rounded-lg object-cover border border-amber-400/60 shadow-[0_0_12px_rgba(251,191,36,0.35)] shrink-0 transition-transform hover:scale-105"
+              />
+              <div className="flex items-center gap-1.5 sm:gap-2 truncate">
+                <Bluetooth className="w-4 h-4 sm:w-5 sm:h-5 text-amber-400 animate-pulse shrink-0" />
+                <span
+                  className="font-tech text-xs sm:text-sm font-semibold text-neutral-300 truncate flex items-center gap-2"
+                  style={{
+                    textShadow: prefs.maskNeon
+                      ? `0 0 ${8 * textFlickerAlpha}px ${prefs.accentColor}`
+                      : 'none',
+                  }}
+                >
+                  {isMicActive ? (
+                    <span className="text-emerald-400 font-bold flex items-center gap-1.5 animate-pulse">
+                      <span className="w-2 h-2 rounded-full bg-emerald-400 animate-ping" />
+                      🎤 Reaccionando a Spotify / Deezer / Micrófono
+                    </span>
+                  ) : (
+                    playbackState.deviceName
+                  )}
+                </span>
+              </div>
             </div>
 
-            <div className="flex items-center gap-2">
-              {/* Load Custom Audio Button */}
+            <div className="flex items-center gap-1.5 sm:gap-2 shrink-0">
+              {/* Native Fullscreen Toggle */}
+              <button
+                onClick={toggleNativeFullscreen}
+                className="p-1.5 sm:p-2 rounded-lg bg-neutral-900 border border-neutral-800 text-neutral-300 hover:text-white hover:border-neutral-700 transition-colors"
+                title="Toggle Fullscreen"
+              >
+                {isNativeFullscreen ? <Minimize2 className="w-3.5 h-3.5 sm:w-4 sm:h-4" /> : <Maximize2 className="w-3.5 h-3.5 sm:w-4 sm:h-4" />}
+              </button>
+
+              {/* Microphone / External Audio Capture (Spotify, Deezer, Youtube, System) */}
+              <button
+                onClick={() => audioEngine.toggleMicCapture()}
+                className={`p-1.5 sm:p-2 rounded-lg border transition-all flex items-center gap-1 ${
+                  isMicActive
+                    ? 'bg-emerald-500 text-black border-emerald-400 font-bold shadow-[0_0_15px_rgba(16,185,129,0.5)] animate-pulse'
+                    : 'bg-neutral-900 border-neutral-800 text-neutral-300 hover:text-white hover:border-neutral-700'
+                }`}
+                title={
+                  isMicActive
+                    ? 'Capturando Audio Externo (Spotify / Deezer / Micrófono) - Clic para detener'
+                    : 'Activar captura de Micrófono / Audio Externo para Spotify, Deezer o YouTube'
+                }
+              >
+                {isMicActive ? <Mic className="w-3.5 h-3.5 sm:w-4 sm:h-4 text-black" /> : <MicOff className="w-3.5 h-3.5 sm:w-4 sm:h-4" />}
+              </button>
+
+              {/* Load Custom Audio / Playlist Batch Button */}
               <button
                 onClick={() => audioInputRef.current?.click()}
-                className="p-2 rounded-lg bg-neutral-900 border border-neutral-800 text-neutral-300 hover:text-white hover:border-neutral-700 transition-colors"
-                title="Load Audio File"
+                className="p-1.5 sm:p-2 rounded-lg bg-neutral-900 border border-neutral-800 text-neutral-300 hover:text-white hover:border-neutral-700 transition-colors"
+                title="Cargar lista o canciones MP3"
               >
-                <Upload className="w-4 h-4" />
+                <Upload className="w-3.5 h-3.5 sm:w-4 sm:h-4" />
+              </button>
+
+              {/* Open Playlist Modal Button */}
+              <button
+                onClick={() => setPlaylistOpen(true)}
+                className={`p-1.5 sm:p-2 rounded-lg border transition-colors relative ${
+                  playlistOpen
+                    ? 'bg-amber-400 text-black border-amber-400 font-bold'
+                    : 'bg-neutral-900 border-neutral-800 text-neutral-300 hover:text-white'
+                }`}
+                title="Ver lista de reproducción"
+              >
+                <ListMusic className="w-3.5 h-3.5 sm:w-4 sm:h-4" />
+                <span className="absolute -top-1 -right-1 w-3.5 h-3.5 rounded-full bg-amber-400 text-black text-[9px] font-bold flex items-center justify-center font-mono">
+                  {audioEngine.getPlaylist().length}
+                </span>
               </button>
 
               {/* Mode Toggle Button */}
@@ -300,52 +421,52 @@ export const App: React.FC = () => {
                     screenMode: (prev.screenMode + 1) % 3,
                   }))
                 }
-                className="p-2 rounded-lg bg-neutral-900 border border-neutral-800 text-neutral-300 hover:text-white hover:border-neutral-700 transition-colors"
+                className="p-1.5 sm:p-2 rounded-lg bg-neutral-900 border border-neutral-800 text-neutral-300 hover:text-white hover:border-neutral-700 transition-colors"
                 title="Toggle Screen Mode (Player / Clock / Mixed)"
               >
-                <Clock className="w-4 h-4" />
+                <Clock className="w-3.5 h-3.5 sm:w-4 sm:h-4" />
               </button>
 
               {/* Equalizer Toggle Button */}
               <button
                 onClick={() => setEqVisible(!eqVisible)}
-                className={`p-2 rounded-lg border transition-colors ${
+                className={`p-1.5 sm:p-2 rounded-lg border transition-colors ${
                   eqVisible
                     ? 'bg-amber-400 text-black border-amber-400 font-bold'
                     : 'bg-neutral-900 border-neutral-800 text-neutral-300 hover:text-white'
                 }`}
                 title="Equalizer"
               >
-                <SlidersHorizontal className="w-4 h-4" />
+                <SlidersHorizontal className="w-3.5 h-3.5 sm:w-4 sm:h-4" />
               </button>
 
               {/* Settings Button */}
               <button
                 onClick={() => setSettingsOpen(true)}
-                className="p-2 rounded-lg bg-neutral-900 border border-neutral-800 text-neutral-300 hover:text-white hover:border-neutral-700 transition-colors"
+                className="p-1.5 sm:p-2 rounded-lg bg-neutral-900 border border-neutral-800 text-neutral-300 hover:text-white hover:border-neutral-700 transition-colors"
                 title="Settings"
               >
-                <SettingsIcon className="w-4 h-4" />
+                <SettingsIcon className="w-3.5 h-3.5 sm:w-4 sm:h-4" />
               </button>
             </div>
           </div>
 
           {/* Player Grid Body */}
-          <div className="flex-1 grid grid-cols-1 lg:grid-cols-12 gap-6 items-stretch overflow-hidden min-h-0 py-2">
+          <div className="flex-1 grid grid-cols-1 landscape:grid-cols-12 lg:grid-cols-12 gap-3 sm:gap-4 lg:gap-6 items-stretch overflow-hidden min-h-0 py-1 sm:py-2">
             {/* Left Column: Cover Art, Metadata & Controls (5 cols) */}
-            <div className="lg:col-span-5 flex flex-col justify-between bg-neutral-950/70 border border-neutral-800/80 rounded-2xl p-5 backdrop-blur-md">
+            <div className="landscape:col-span-5 lg:col-span-5 flex flex-col justify-between bg-neutral-950/80 border border-neutral-800/80 rounded-xl sm:rounded-2xl p-3 sm:p-5 landscape:p-2.5 backdrop-blur-md overflow-y-auto no-scrollbar landscape:overflow-hidden">
               {/* Cover Art Image */}
-              <div className="flex justify-center items-center my-auto py-2">
+              <div className="flex justify-center items-center my-auto py-1 landscape:py-0.5">
                 <div className="relative group">
                   <img
                     src={coverArtUrl || undefined}
                     alt="Album Cover"
-                    className="w-44 h-44 sm:w-56 sm:h-56 md:w-60 md:h-60 rounded-2xl object-cover shadow-2xl border border-white/10"
+                    className="w-28 h-28 xs:w-36 xs:h-36 sm:w-48 sm:h-48 md:w-56 md:h-56 landscape:w-20 landscape:h-20 sm:landscape:w-28 sm:landscape:h-28 max-h-[25vh] landscape:max-h-[30vh] rounded-xl sm:rounded-2xl object-cover shadow-2xl border border-white/10"
                     style={{
                       boxShadow: prefs.maskNeon ? `0 0 25px ${prefs.accentColor}40` : undefined,
                     }}
                   />
-                  <div className="absolute inset-0 rounded-2xl bg-black/40 opacity-0 group-hover:opacity-100 flex items-center justify-center transition-opacity cursor-pointer">
+                  <div className="absolute inset-0 rounded-xl sm:rounded-2xl bg-black/40 opacity-0 group-hover:opacity-100 flex items-center justify-center transition-opacity cursor-pointer">
                     <Maximize2
                       onClick={() =>
                         updatePrefs((prev) => ({
@@ -353,7 +474,7 @@ export const App: React.FC = () => {
                           coverStyle: (prev.coverStyle + 1) % 3,
                         }))
                       }
-                      className="w-8 h-8 text-white"
+                      className="w-6 h-6 sm:w-8 sm:h-8 text-white"
                       title="Change Cover Style"
                     />
                   </div>
@@ -361,10 +482,10 @@ export const App: React.FC = () => {
               </div>
 
               {/* Track Info Marquee */}
-              <div className="text-center my-3 overflow-hidden">
+              <div className="text-center my-1.5 sm:my-3 landscape:my-1 overflow-hidden">
                 <div className="overflow-hidden w-full relative">
                   <h1
-                    className="font-orbitron font-extrabold text-lg sm:text-xl md:text-2xl tracking-wide whitespace-nowrap animate-marquee"
+                    className="font-orbitron font-extrabold text-base sm:text-xl md:text-2xl landscape:text-xs sm:landscape:text-sm tracking-wide whitespace-nowrap animate-marquee"
                     style={{
                       color: prefs.maskNeon ? prefs.accentColor : '#F2F4F8',
                       textShadow: prefs.maskNeon
@@ -377,7 +498,7 @@ export const App: React.FC = () => {
                 </div>
 
                 <h2
-                  className="font-tech text-sm sm:text-base font-medium mt-1"
+                  className="font-tech text-xs sm:text-base landscape:text-[11px] font-medium mt-0.5"
                   style={{
                     color: prefs.accentColor,
                     textShadow: prefs.maskNeon
@@ -388,13 +509,13 @@ export const App: React.FC = () => {
                   {playbackState.artist || 'Waiting for audio...'}
                 </h2>
 
-                <p className="font-tech text-xs text-neutral-400 mt-0.5">
+                <p className="font-tech text-[10px] sm:text-xs text-neutral-400 mt-0.5 truncate">
                   {playbackState.album}
                 </p>
               </div>
 
               {/* Progress & Duration Slider */}
-              <div className="my-2 space-y-1">
+              <div className="my-1 sm:my-2 landscape:my-1 space-y-0.5 sm:space-y-1">
                 <input
                   type="range"
                   min="0"
@@ -411,10 +532,10 @@ export const App: React.FC = () => {
                     audioEngine.seekToMs(seekProgress);
                   }}
                   onChange={(e) => setSeekProgress(parseInt(e.target.value))}
-                  className="w-full h-2 rounded-lg accent-amber-400 cursor-pointer bg-neutral-800"
+                  className="w-full h-1.5 sm:h-2 rounded-lg accent-amber-400 cursor-pointer bg-neutral-800"
                   style={{ accentColor: prefs.accentColor }}
                 />
-                <div className="flex justify-between font-tech text-xs text-neutral-400">
+                <div className="flex justify-between font-tech text-[10px] sm:text-xs text-neutral-400">
                   <span
                     style={{
                       textShadow: prefs.maskNeon
@@ -429,40 +550,40 @@ export const App: React.FC = () => {
               </div>
 
               {/* Playback Controls */}
-              <div className="flex items-center justify-center gap-6 mt-2 pt-2 border-t border-neutral-800/60">
+              <div className="flex items-center justify-center gap-4 sm:gap-6 mt-1 sm:mt-2 pt-1.5 sm:pt-2 border-t border-neutral-800/60">
                 <button
                   onClick={handlePrev}
-                  className="p-3 rounded-full bg-neutral-900 border border-neutral-800 text-neutral-200 hover:text-white hover:border-neutral-700 hover:scale-105 active:scale-95 transition-all"
+                  className="p-2 sm:p-3 landscape:p-2 rounded-full bg-neutral-900 border border-neutral-800 text-neutral-200 hover:text-white hover:border-neutral-700 hover:scale-105 active:scale-95 transition-all"
                 >
-                  <SkipBack className="w-5 h-5 fill-current" />
+                  <SkipBack className="w-4 h-4 sm:w-5 sm:h-5 fill-current" />
                 </button>
 
                 <button
                   onClick={handlePlayPause}
-                  className="p-4 rounded-full text-black font-bold hover:scale-105 active:scale-95 transition-all shadow-lg"
+                  className="p-3 sm:p-4 landscape:p-2.5 rounded-full text-black font-bold hover:scale-105 active:scale-95 transition-all shadow-lg"
                   style={{
                     backgroundColor: prefs.accentColor,
                     boxShadow: `0 0 20px ${prefs.accentColor}80`,
                   }}
                 >
                   {playbackState.isPlaying ? (
-                    <Pause className="w-6 h-6 fill-current" />
+                    <Pause className="w-5 h-5 sm:w-6 sm:h-6 fill-current" />
                   ) : (
-                    <Play className="w-6 h-6 fill-current ml-0.5" />
+                    <Play className="w-5 h-5 sm:w-6 sm:h-6 fill-current ml-0.5" />
                   )}
                 </button>
 
                 <button
                   onClick={handleNext}
-                  className="p-3 rounded-full bg-neutral-900 border border-neutral-800 text-neutral-200 hover:text-white hover:border-neutral-700 hover:scale-105 active:scale-95 transition-all"
+                  className="p-2 sm:p-3 landscape:p-2 rounded-full bg-neutral-900 border border-neutral-800 text-neutral-200 hover:text-white hover:border-neutral-700 hover:scale-105 active:scale-95 transition-all"
                 >
-                  <SkipForward className="w-5 h-5 fill-current" />
+                  <SkipForward className="w-4 h-4 sm:w-5 sm:h-5 fill-current" />
                 </button>
               </div>
             </div>
 
             {/* Right Column: Visualizer Canvas / Nixie Clock / EQ Panel (7 cols) */}
-            <div className="lg:col-span-7 flex flex-col gap-4 h-full min-h-[300px]">
+            <div className="landscape:col-span-7 lg:col-span-7 flex flex-col gap-2 sm:gap-4 h-full min-h-[180px] sm:min-h-[250px] overflow-hidden">
               {/* If Equalizer Panel is toggled */}
               {eqVisible ? (
                 <div className="flex-1">
@@ -471,14 +592,14 @@ export const App: React.FC = () => {
               ) : (
                 /* Screen Mode 2 (Mixed: Nixie Clock + Visualizer side-by-side or stacked) */
                 prefs.screenMode === 2 && (
-                  <div className="h-44 sm:h-52 bg-neutral-950/80 border border-neutral-800/80 rounded-2xl p-3 flex items-center justify-center">
+                  <div className="h-32 sm:h-52 bg-neutral-950/80 border border-neutral-800/80 rounded-xl sm:rounded-2xl p-2 sm:p-3 flex items-center justify-center shrink-0">
                     <NixieClock glow={prefs.nixieGlow} use24h={prefs.nixie24h} />
                   </div>
                 )
               )}
 
               {/* Audio Visualizer View */}
-              <div className="flex-1 bg-neutral-950/80 border border-neutral-800/80 rounded-2xl p-4 flex flex-col justify-between overflow-hidden relative">
+              <div className="flex-1 bg-neutral-950/80 border border-neutral-800/80 rounded-xl sm:rounded-2xl p-2 sm:p-4 flex flex-col justify-between overflow-hidden relative min-h-0">
                 <VisualizerView
                   prefs={prefs}
                   onUpdatePrefs={updatePrefs}
@@ -486,7 +607,7 @@ export const App: React.FC = () => {
                 />
 
                 {/* Gesture info label at bottom right */}
-                <div className="absolute bottom-2 right-3 font-tech text-[10px] text-neutral-500 pointer-events-none opacity-60">
+                <div className="absolute bottom-1.5 right-2 sm:bottom-2 sm:right-3 font-tech text-[9px] sm:text-[10px] text-neutral-500 pointer-events-none opacity-60">
                   Tap: style | Dbl-tap: color | Hold: full
                 </div>
               </div>
@@ -531,6 +652,19 @@ export const App: React.FC = () => {
           <div>[ACTION_BT_MUSIC_PLAY] isPlaying={playbackState.isPlaying ? 'true' : 'false'}</div>
         </div>
       )}
+
+      {/* PLAYLIST MODAL */}
+      <PlaylistModal
+        isOpen={playlistOpen}
+        onClose={() => setPlaylistOpen(false)}
+        playlist={audioEngine.getPlaylist()}
+        currentTrackIndex={audioEngine.getCurrentTrackIndex()}
+        isPlaying={playbackState.isPlaying}
+        onSelectTrack={(idx) => audioEngine.playTrackIndex(idx)}
+        onRemoveTrack={(idx) => audioEngine.removeTrack(idx)}
+        onUploadClick={() => audioInputRef.current?.click()}
+        accentColor={prefs.accentColor}
+      />
 
       {/* SETTINGS MODAL */}
       <SettingsModal

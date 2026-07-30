@@ -100,6 +100,61 @@ export const PALETTES: Palette[] = [
     name: "Galaxia",
     colors: ["#FF61D2", "#7C3AED", "#2563EB", "#06B6D4"],
     stops: [0, 0.35, 0.7, 1]
+  },
+  {
+    name: "Vaporwave",
+    colors: ["#FF71CE", "#01CDFE", "#05FFA1", "#B967FF"],
+    stops: [0, 0.33, 0.66, 1]
+  },
+  {
+    name: "Aurora Boreal",
+    colors: ["#00FFA3", "#00B8FF", "#7000FF", "#FF007A"],
+    stops: [0, 0.33, 0.66, 1]
+  },
+  {
+    name: "Oro de lujo",
+    colors: ["#FFF099", "#FFD700", "#DAA520", "#B8860B"],
+    stops: [0, 0.33, 0.66, 1]
+  },
+  {
+    name: "Ultravioleta",
+    colors: ["#F72585", "#7209B7", "#3F37C9", "#4CC9F0"],
+    stops: [0, 0.33, 0.66, 1]
+  },
+  {
+    name: "Ciber Fluo",
+    colors: ["#CCFF00", "#FF0055", "#00FFFF"],
+    stops: [0, 0.5, 1]
+  },
+  {
+    name: "Matrix Code",
+    colors: ["#00FF41", "#00B32C", "#003B00"],
+    stops: [0, 0.5, 1]
+  },
+  {
+    name: "EDM Electro",
+    colors: ["#00FF88", "#00E5FF", "#7B00FF"],
+    stops: [0, 0.5, 1]
+  },
+  {
+    name: "Supernova",
+    colors: ["#FFFFFF", "#FFE600", "#FF4500", "#9900FF"],
+    stops: [0, 0.33, 0.66, 1]
+  },
+  {
+    name: "Nitro Furia",
+    colors: ["#FF0000", "#FF5500", "#FFFF00"],
+    stops: [0, 0.5, 1]
+  },
+  {
+    name: "Pastel Neón",
+    colors: ["#FFB3BA", "#FFDFBA", "#BAFFC9", "#BAE1FF"],
+    stops: [0, 0.33, 0.66, 1]
+  },
+  {
+    name: "Tóxico",
+    colors: ["#70FF00", "#00FF66", "#00FFFF"],
+    stops: [0, 0.5, 1]
   }
 ];
 

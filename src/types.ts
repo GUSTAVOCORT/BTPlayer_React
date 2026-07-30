@@ -20,6 +20,7 @@ export interface AppPrefs {
   nixieGlow: boolean;
   nixie24h: boolean;
   showDebug: boolean;
+  autoThemeOnChange?: boolean;
 }
 
 export interface PlaybackState {

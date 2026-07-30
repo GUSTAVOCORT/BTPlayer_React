@@ -7,6 +7,13 @@
   .font-tech {
     font-family: 'Share Tech Mono', monospace;
   }
+  .no-scrollbar::-webkit-scrollbar {
+    display: none;
+  }
+  .no-scrollbar {
+    -ms-overflow-style: none;
+    scrollbar-width: none;
+  }
 }
 
 @keyframes marquee {

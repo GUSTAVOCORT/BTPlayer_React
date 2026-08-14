@@ -1,4 +1,5 @@
 import React, { useEffect, useState } from 'react';
+import { audioEngine } from './AudioEngine';
 
 interface NeonFrameProps {
   neonColor?: string;
@@ -12,7 +13,9 @@ export const NeonFrame: React.FC<NeonFrameProps> = ({
   flicker = true,
 }) => {
   const [flickerAlpha, setFlickerAlpha] = useState(1);
+  const [bassPulse, setBassPulse] = useState(0);
 
+  // Flicker loop
   useEffect(() => {
     if (!enabled || !flicker) {
       setFlickerAlpha(1);
@@ -39,15 +42,37 @@ export const NeonFrame: React.FC<NeonFrameProps> = ({
     };
   }, [enabled, flicker]);
 
+  // Audio beat pulse loop
+  useEffect(() => {
+    if (!enabled) return;
+
+    let animId: number;
+    const pulseLoop = () => {
+      if (audioEngine.isCurrentlyPlaying()) {
+        const bass = audioEngine.getBassEnergy();
+        setBassPulse(bass);
+      } else {
+        setBassPulse(0);
+      }
+      animId = requestAnimationFrame(pulseLoop);
+    };
+
+    animId = requestAnimationFrame(pulseLoop);
+    return () => cancelAnimationFrame(animId);
+  }, [enabled]);
+
   if (!enabled) return null;
+
+  const glowSpread = 16 + Math.round(bassPulse * 22);
+  const finalAlpha = Math.min(1, Math.max(0.3, flickerAlpha * (0.8 + bassPulse * 0.4)));
 
   return (
     <div
-      className="pointer-events-none absolute inset-[6px] rounded-2xl border-2 transition-opacity duration-75 z-40"
+      className="pointer-events-none absolute inset-[4px] sm:inset-[6px] rounded-2xl border-2 transition-all duration-75 z-40"
       style={{
         borderColor: neonColor,
-        opacity: flickerAlpha,
-        boxShadow: `0 0 18px ${neonColor}, inset 0 0 18px ${neonColor}`,
+        opacity: finalAlpha,
+        boxShadow: `0 0 ${glowSpread}px ${neonColor}, inset 0 0 ${Math.round(glowSpread * 0.7)}px ${neonColor}`,
       }}
     />
   );

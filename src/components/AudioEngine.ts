@@ -1,8 +1,16 @@
 import { TrackItem } from '../types';
+import {
+  saveTracksToStorage,
+  loadTracksFromStorage,
+  deleteTrackFromStorage,
+  clearAllTracksFromStorage,
+  savePlaybackSession,
+  loadPlaybackSession,
+} from '../utils/trackStorage';
 
 export const SAMPLE_TRACKS: TrackItem[] = [
   {
-    id: '1',
+    id: 'sample_1',
     title: 'Midnight Synth Drive',
     artist: 'Neon Cyber Driver',
     album: 'Retro Wave 1984',
@@ -11,7 +19,7 @@ export const SAMPLE_TRACKS: TrackItem[] = [
     isSynth: false,
   },
   {
-    id: '2',
+    id: 'sample_2',
     title: 'Nixie Tube Glow',
     artist: 'Analog Resonator',
     album: 'Vacuum Dreams',
@@ -20,7 +28,7 @@ export const SAMPLE_TRACKS: TrackItem[] = [
     isSynth: false,
   },
   {
-    id: '3',
+    id: 'sample_3',
     title: 'Cyberpunk Highway',
     artist: 'Synthwave FM',
     album: 'Night Shift',
@@ -29,7 +37,7 @@ export const SAMPLE_TRACKS: TrackItem[] = [
     isSynth: false,
   },
   {
-    id: '4',
+    id: 'sample_4',
     title: 'A2DP Bluetooth Stream',
     artist: 'Dashboard Anthems',
     album: 'Car Systems 80s',
@@ -38,6 +46,8 @@ export const SAMPLE_TRACKS: TrackItem[] = [
     isSynth: false,
   },
 ];
+
+export type RepeatMode = 'off' | 'all' | 'one';
 
 class AudioEngine {
   private audioCtx: AudioContext | null = null;
@@ -55,9 +65,61 @@ class AudioEngine {
   private micStream: MediaStream | null = null;
   private micSourceNode: MediaStreamAudioSourceNode | null = null;
   private isMicActive = false;
+  private micAnalyser: AnalyserNode | null = null;
+
+  // Repeat & Shuffle Modes
+  private repeatMode: RepeatMode = 'all';
+  private isShuffle = false;
+  private playlist: TrackItem[] = [...SAMPLE_TRACKS];
+  private isRestored = false;
 
   constructor() {
-    // Lazy initialization on user interaction
+    // Restore session settings
+    const session = loadPlaybackSession();
+    if (session) {
+      if (session.repeatMode) this.repeatMode = session.repeatMode;
+      if (session.shuffle !== undefined) this.isShuffle = session.shuffle;
+      if (session.positionMs) this.trackElapsedOffset = session.positionMs;
+    }
+  }
+
+  public async restorePersistedTracks(): Promise<void> {
+    if (this.isRestored) return;
+    try {
+      const storedTracks = await loadTracksFromStorage();
+      if (storedTracks && storedTracks.length > 0) {
+        // Prepend custom tracks before sample tracks
+        this.playlist = [...storedTracks, ...SAMPLE_TRACKS];
+      } else {
+        this.playlist = [...SAMPLE_TRACKS];
+      }
+
+      // Check if we had a saved track index or track ID
+      const session = loadPlaybackSession();
+      if (session) {
+        if (session.currentTrackId) {
+          const idx = this.playlist.findIndex((t) => t.id === session.currentTrackId);
+          if (idx !== -1) {
+            this.currentTrackIndex = idx;
+          } else if (session.currentTrackIndex !== undefined && session.currentTrackIndex < this.playlist.length) {
+            this.currentTrackIndex = session.currentTrackIndex;
+          }
+        } else if (session.currentTrackIndex !== undefined && session.currentTrackIndex < this.playlist.length) {
+          this.currentTrackIndex = session.currentTrackIndex;
+        }
+
+        if (session.positionMs && session.positionMs > 0) {
+          this.trackElapsedOffset = session.positionMs;
+        }
+      }
+
+      this.isRestored = true;
+      this.notify();
+    } catch (e) {
+      console.warn('Error restoring persisted tracks:', e);
+      this.playlist = [...SAMPLE_TRACKS];
+      this.isRestored = true;
+    }
   }
 
   public initAudio() {
@@ -79,7 +141,7 @@ class AudioEngine {
 
       // Master Gain
       this.currentGainNode = this.audioCtx.createGain();
-      this.currentGainNode.gain.value = 0.8;
+      this.currentGainNode.gain.value = 0.9;
 
       // 5-Band EQ
       const freqs = [60, 230, 910, 3600, 14000];
@@ -111,14 +173,16 @@ class AudioEngine {
       this.audioElement.crossOrigin = 'anonymous';
 
       this.audioElement.onended = () => {
-        this.nextTrack();
+        this.handleTrackEnded();
       };
 
       this.audioElement.onloadedmetadata = () => {
-        if (this.audioElement && this.audioElement.duration) {
+        if (this.audioElement && this.audioElement.duration && !isNaN(this.audioElement.duration)) {
           const cur = this.getCurrentTrack();
-          cur.durationMs = Math.round(this.audioElement.duration * 1000);
-          this.notify();
+          if (cur) {
+            cur.durationMs = Math.round(this.audioElement.duration * 1000);
+            this.notify();
+          }
         }
       };
 
@@ -145,33 +209,116 @@ class AudioEngine {
     }
   }
 
-  public getFFTData(): Uint8Array {
-    if (!this.analyser) {
-      const arr = new Uint8Array(64);
-      if (this.isPlaying) {
-        const now = Date.now() / 150;
-        for (let i = 0; i < 64; i++) {
-          const val = Math.sin(now + i * 0.3) * 60 + Math.cos(now * 0.7 + i * 0.1) * 50 + 80;
-          arr[i] = Math.max(10, Math.min(255, Math.floor(val)));
-        }
-      }
-      return arr;
+  private handleTrackEnded() {
+    if (this.repeatMode === 'one') {
+      // Loop same track from 0
+      this.resetTimer();
+      this.play();
+      return;
     }
-    const data = new Uint8Array(this.analyser.frequencyBinCount);
-    this.analyser.getByteFrequencyData(data);
-    return data;
+
+    if (this.isShuffle) {
+      this.playRandomTrack();
+      return;
+    }
+
+    // Normal forward progression
+    if (this.currentTrackIndex < this.playlist.length - 1) {
+      this.nextTrack();
+    } else {
+      // At end of playlist
+      if (this.repeatMode === 'all') {
+        this.currentTrackIndex = 0;
+        this.resetTimer();
+        this.play();
+      } else {
+        // Repeat OFF -> stop playback
+        this.pause();
+        this.resetTimer();
+      }
+    }
+  }
+
+  private playRandomTrack() {
+    if (this.playlist.length <= 1) {
+      this.resetTimer();
+      this.play();
+      return;
+    }
+    let nextIdx = this.currentTrackIndex;
+    while (nextIdx === this.currentTrackIndex) {
+      nextIdx = Math.floor(Math.random() * this.playlist.length);
+    }
+    this.stopAudioAndSynth();
+    this.currentTrackIndex = nextIdx;
+    this.resetTimer();
+    this.play();
+  }
+
+  public getFFTData(): Uint8Array {
+    if (this.isMicActive && this.micAnalyser) {
+      const data = new Uint8Array(this.micAnalyser.frequencyBinCount);
+      this.micAnalyser.getByteFrequencyData(data);
+      return data;
+    }
+    if (this.analyser) {
+      const data = new Uint8Array(this.analyser.frequencyBinCount);
+      this.analyser.getByteFrequencyData(data);
+      return data;
+    }
+    const arr = new Uint8Array(64);
+    if (this.isPlaying) {
+      const now = Date.now() / 150;
+      for (let i = 0; i < 64; i++) {
+        const val = Math.sin(now + i * 0.3) * 60 + Math.cos(now * 0.7 + i * 0.1) * 50 + 80;
+        arr[i] = Math.max(10, Math.min(255, Math.floor(val)));
+      }
+    }
+    return arr;
+  }
+
+  /**
+   * Returns normalized bass energy (0..1) for pulsing beats & neon glow
+   */
+  public getBassEnergy(): number {
+    const data = this.getFFTData();
+    if (!data || data.length === 0) return 0;
+    const bins = Math.min(8, data.length);
+    let sum = 0;
+    for (let i = 0; i < bins; i++) {
+      sum += data[i];
+    }
+    return Math.min(1, Math.max(0, (sum / (bins * 255)) * 1.3));
+  }
+
+  /**
+   * Returns normalized overall audio energy (0..1)
+   */
+  public getOverallEnergy(): number {
+    const data = this.getFFTData();
+    if (!data || data.length === 0) return 0;
+    let sum = 0;
+    for (let i = 0; i < data.length; i++) {
+      sum += data[i];
+    }
+    return Math.min(1, Math.max(0, sum / (data.length * 255)));
   }
 
   private updateMediaSession() {
     if ('mediaSession' in navigator) {
       const track = this.getCurrentTrack();
+      if (!track) return;
       navigator.mediaSession.metadata = new MediaMetadata({
         title: track.title,
         artist: track.artist,
         album: track.album,
         artwork: [
-          { src: 'https://images.unsplash.com/photo-1618005182384-a83a8bd57fbe?w=500&auto=format&fit=crop&q=80', sizes: '512x512', type: 'image/jpeg' }
-        ]
+          {
+            src: 'https://images.unsplash.com/photo-1618005182384-a83a8bd57fbe?w=500&auto=format&fit=crop&q=80',
+            sizes: '512x512',
+            type: 'image/jpeg',
+          },
+        ],
       });
 
       try {
@@ -190,12 +337,10 @@ class AudioEngine {
 
     this.isPlaying = true;
     this.trackStartTime = Date.now();
-
-    // Always stop synth engine when attempting to play real audio
     this.stopSynthEngine();
 
     const track = this.getCurrentTrack();
-    if (track.url) {
+    if (track && track.url) {
       const audio = this.getOrCreateAudioElement();
       if (audio.src !== track.url) {
         audio.src = track.url;
@@ -207,13 +352,11 @@ class AudioEngine {
       try {
         await audio.play();
       } catch (err) {
-        console.warn('Audio play error, falling back to synth engine:', err);
-        this.startSynthEngine();
+        console.warn('Audio play error:', err);
       }
-    } else {
-      this.startSynthEngine();
     }
 
+    this.persistCurrentSession();
     this.updateMediaSession();
     this.notify();
   }
@@ -227,6 +370,7 @@ class AudioEngine {
       this.trackElapsedOffset += Date.now() - this.trackStartTime;
     }
     this.stopSynthEngine();
+    this.persistCurrentSession();
     this.notify();
   }
 
@@ -237,8 +381,13 @@ class AudioEngine {
 
   public nextTrack() {
     this.stopAudioAndSynth();
-    this.currentTrackIndex = (this.currentTrackIndex + 1) % SAMPLE_TRACKS.length;
+    if (this.isShuffle) {
+      this.playRandomTrack();
+      return;
+    }
+    this.currentTrackIndex = (this.currentTrackIndex + 1) % this.playlist.length;
     this.resetTimer();
+    this.persistCurrentSession();
     if (this.isPlaying) {
       this.play();
     } else {
@@ -247,9 +396,17 @@ class AudioEngine {
   }
 
   public prevTrack() {
+    // If playback is more than 3 seconds in, restart the song from beginning
+    if (this.getPositionMs() > 3000) {
+      this.seekToMs(0);
+      return;
+    }
+
     this.stopAudioAndSynth();
-    this.currentTrackIndex = (this.currentTrackIndex - 1 + SAMPLE_TRACKS.length) % SAMPLE_TRACKS.length;
+    this.currentTrackIndex =
+      (this.currentTrackIndex - 1 + this.playlist.length) % this.playlist.length;
     this.resetTimer();
+    this.persistCurrentSession();
     if (this.isPlaying) {
       this.play();
     } else {
@@ -271,6 +428,7 @@ class AudioEngine {
     if (this.audioElement) {
       this.audioElement.currentTime = ms / 1000;
     }
+    this.persistCurrentSession();
     this.notify();
   }
 
@@ -283,7 +441,13 @@ class AudioEngine {
   }
 
   public getCurrentTrack(): TrackItem {
-    return SAMPLE_TRACKS[this.currentTrackIndex];
+    if (this.playlist.length === 0) {
+      return SAMPLE_TRACKS[0];
+    }
+    if (this.currentTrackIndex >= this.playlist.length) {
+      this.currentTrackIndex = 0;
+    }
+    return this.playlist[this.currentTrackIndex];
   }
 
   public getPositionMs(): number {
@@ -292,8 +456,8 @@ class AudioEngine {
     }
     if (!this.isPlaying) return this.trackElapsedOffset;
     const elapsed = this.trackElapsedOffset + (Date.now() - this.trackStartTime);
-    const dur = this.getCurrentTrack().durationMs;
-    return elapsed % (dur || 180000);
+    const dur = this.getCurrentTrack()?.durationMs || 180000;
+    return Math.min(dur, elapsed);
   }
 
   public setEQBandLevel(bandIndex: number, levelMillibels: number) {
@@ -305,8 +469,6 @@ class AudioEngine {
 
   private startSynthEngine() {
     this.stopSynthEngine();
-    // Audible synth audio disabled per user request to eliminate default beep tones.
-    // Visualizer simulation handles FFT data silently in getFFTData().
   }
 
   private stopSynthEngine() {
@@ -337,28 +499,85 @@ class AudioEngine {
 
   public async startMicCapture(): Promise<boolean> {
     this.initAudio();
-    if (!this.audioCtx) return false;
+    if (this.audioCtx && this.audioCtx.state === 'suspended') {
+      try {
+        await this.audioCtx.resume();
+      } catch (_e) {}
+    }
+
+    const nav = navigator as any;
+    const getUserMedia =
+      nav.mediaDevices?.getUserMedia?.bind(nav.mediaDevices) ||
+      nav.getUserMedia?.bind(nav) ||
+      nav.webkitGetUserMedia?.bind(nav) ||
+      nav.mozGetUserMedia?.bind(nav);
+
+    if (!getUserMedia) {
+      alert(
+        '📱 Tu navegador no admite acceso directo al micrófono en esta ventana. Por favor abre la aplicación en una pestaña independiente (HTTPS).'
+      );
+      return false;
+    }
 
     try {
       if (this.isMicActive) return true;
-      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-      this.micStream = stream;
-      this.micSourceNode = this.audioCtx.createMediaStreamSource(stream);
 
-      if (this.eqBands.length > 0) {
-        this.micSourceNode.connect(this.eqBands[0]);
-      } else if (this.analyser) {
-        this.micSourceNode.connect(this.analyser);
+      let stream: MediaStream;
+      if (nav.mediaDevices?.getUserMedia) {
+        stream = await nav.mediaDevices.getUserMedia({
+          audio: {
+            echoCancellation: false,
+            noiseSuppression: false,
+            autoGainControl: true,
+          },
+        });
+      } else {
+        stream = await new Promise((resolve, reject) => {
+          getUserMedia({ audio: true }, resolve, reject);
+        });
       }
+
+      this.micStream = stream;
+      if (!this.audioCtx) this.initAudio();
+
+      this.micSourceNode = this.audioCtx!.createMediaStreamSource(stream);
+
+      const highPassFilter = this.audioCtx!.createBiquadFilter();
+      highPassFilter.type = 'highpass';
+      highPassFilter.frequency.value = 50;
+
+      const lowPassFilter = this.audioCtx!.createBiquadFilter();
+      lowPassFilter.type = 'lowpass';
+      lowPassFilter.frequency.value = 14000;
+
+      this.micAnalyser = this.audioCtx!.createAnalyser();
+      this.micAnalyser.fftSize = 128;
+      this.micAnalyser.smoothingTimeConstant = 0.8;
+
+      this.micSourceNode.connect(highPassFilter);
+      highPassFilter.connect(lowPassFilter);
+      lowPassFilter.connect(this.micAnalyser);
 
       this.isMicActive = true;
       this.isPlaying = true;
       this.notify();
       return true;
-    } catch (e) {
+    } catch (e: any) {
       console.warn('Microphone permission denied or error:', e);
       this.isMicActive = false;
       this.notify();
+
+      let errorMessage = 'No se pudo activar el micrófono.';
+      if (e?.name === 'NotAllowedError' || e?.name === 'PermissionDeniedError') {
+        errorMessage =
+          '🎤 Permiso de micrófono denegado.\n\nPara reaccionar a Spotify, Deezer o música ambiental:\n1. Toca el ícono del candado o configuración en tu navegador.\n2. Permite el acceso al micrófono.';
+      } else if (e?.name === 'NotFoundError') {
+        errorMessage = '🎤 No se detectó ningún micrófono en tu dispositivo.';
+      } else {
+        errorMessage = `🎤 Error al conectar micrófono: ${e?.message || 'Permiso restringido'}.`;
+      }
+
+      alert(errorMessage);
       return false;
     }
   }
@@ -369,6 +588,12 @@ class AudioEngine {
         this.micSourceNode.disconnect();
       } catch (_e) {}
       this.micSourceNode = null;
+    }
+    if (this.micAnalyser) {
+      try {
+        this.micAnalyser.disconnect();
+      } catch (_e) {}
+      this.micAnalyser = null;
     }
     if (this.micStream) {
       this.micStream.getTracks().forEach((track) => track.stop());
@@ -387,16 +612,18 @@ class AudioEngine {
     }
   }
 
-  public loadCustomTrack(title: string, artist: string, album: string, url: string) {
-    this.loadCustomTracks([{ title, artist, album, url }]);
-  }
-
-  public loadCustomTracks(tracks: Array<{ title: string; artist: string; album: string; url: string }>) {
+  /**
+   * Save loaded audio files persistently into IndexedDB
+   */
+  public async loadCustomTracks(
+    tracks: Array<{ title: string; artist: string; album: string; url: string; file?: File; blob?: Blob }>
+  ) {
     if (!tracks || tracks.length === 0) return;
     this.stopAudioAndSynth();
 
+    const timestamp = Date.now();
     const newTrackItems: TrackItem[] = tracks.map((t, idx) => ({
-      id: 'custom_' + Date.now() + '_' + idx,
+      id: 'custom_' + timestamp + '_' + idx,
       title: t.title,
       artist: t.artist || 'Archivo Local',
       album: t.album || 'Mi Música',
@@ -405,14 +632,48 @@ class AudioEngine {
       isSynth: false,
     }));
 
-    SAMPLE_TRACKS.unshift(...newTrackItems);
+    // Save to IndexedDB if Blob/File is available
+    const tracksToPersist = tracks
+      .map((t, idx) => {
+        const blob = t.file || t.blob;
+        if (!blob) return null;
+        return {
+          id: newTrackItems[idx].id,
+          title: newTrackItems[idx].title,
+          artist: newTrackItems[idx].artist,
+          album: newTrackItems[idx].album,
+          durationMs: newTrackItems[idx].durationMs,
+          blob,
+        };
+      })
+      .filter(Boolean) as Array<{
+      id: string;
+      title: string;
+      artist: string;
+      album: string;
+      durationMs: number;
+      blob: Blob;
+    }>;
+
+    if (tracksToPersist.length > 0) {
+      saveTracksToStorage(tracksToPersist).catch((err) =>
+        console.warn('Could not persist tracks to DB:', err)
+      );
+    }
+
+    this.playlist = [...newTrackItems, ...this.playlist];
     this.currentTrackIndex = 0;
     this.resetTimer();
+    this.persistCurrentSession();
     this.play();
   }
 
+  public loadCustomTrack(title: string, artist: string, album: string, url: string, file?: File) {
+    this.loadCustomTracks([{ title, artist, album, url, file }]);
+  }
+
   public getPlaylist(): TrackItem[] {
-    return SAMPLE_TRACKS;
+    return this.playlist;
   }
 
   public getCurrentTrackIndex(): number {
@@ -420,24 +681,88 @@ class AudioEngine {
   }
 
   public playTrackIndex(index: number) {
-    if (index < 0 || index >= SAMPLE_TRACKS.length) return;
+    if (index < 0 || index >= this.playlist.length) return;
     this.stopAudioAndSynth();
     this.currentTrackIndex = index;
     this.resetTimer();
+    this.persistCurrentSession();
     this.play();
   }
 
-  public removeTrack(index: number) {
-    if (index < 0 || index >= SAMPLE_TRACKS.length) return;
-    if (SAMPLE_TRACKS.length <= 1) return; // Keep at least one track
-    SAMPLE_TRACKS.splice(index, 1);
-    if (this.currentTrackIndex >= SAMPLE_TRACKS.length) {
+  public async removeTrack(index: number) {
+    if (index < 0 || index >= this.playlist.length) return;
+    if (this.playlist.length <= 1) return;
+
+    const removed = this.playlist[index];
+    if (removed.id.startsWith('custom_')) {
+      deleteTrackFromStorage(removed.id).catch(() => {});
+    }
+
+    this.playlist.splice(index, 1);
+    if (this.currentTrackIndex >= this.playlist.length) {
       this.currentTrackIndex = 0;
     }
+    this.persistCurrentSession();
     this.notify();
+  }
+
+  public async clearCustomLibrary() {
+    await clearAllTracksFromStorage();
+    this.playlist = [...SAMPLE_TRACKS];
+    this.currentTrackIndex = 0;
+    this.resetTimer();
+    this.persistCurrentSession();
+    this.notify();
+  }
+
+  // Repeat & Shuffle API
+  public getRepeatMode(): RepeatMode {
+    return this.repeatMode;
+  }
+
+  public toggleRepeatMode(): RepeatMode {
+    if (this.repeatMode === 'all') this.repeatMode = 'one';
+    else if (this.repeatMode === 'one') this.repeatMode = 'off';
+    else this.repeatMode = 'all';
+
+    this.persistCurrentSession();
+    this.notify();
+    return this.repeatMode;
+  }
+
+  public setRepeatMode(mode: RepeatMode) {
+    this.repeatMode = mode;
+    this.persistCurrentSession();
+    this.notify();
+  }
+
+  public isShuffleActive(): boolean {
+    return this.isShuffle;
+  }
+
+  public toggleShuffle(): boolean {
+    this.isShuffle = !this.isShuffle;
+    this.persistCurrentSession();
+    this.notify();
+    return this.isShuffle;
+  }
+
+  public setShuffle(active: boolean) {
+    this.isShuffle = active;
+    this.persistCurrentSession();
+    this.notify();
+  }
+
+  private persistCurrentSession() {
+    const cur = this.getCurrentTrack();
+    savePlaybackSession({
+      currentTrackId: cur?.id,
+      currentTrackIndex: this.currentTrackIndex,
+      positionMs: this.getPositionMs(),
+      repeatMode: this.repeatMode,
+      shuffle: this.isShuffle,
+    });
   }
 }
 
 export const audioEngine = new AudioEngine();
-
-

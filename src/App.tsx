@@ -3,7 +3,7 @@ import { AppPrefs, PlaybackState } from './types';
 import { getAccentColor, getPalette, PALETTES } from './utils/palettes';
 import { generateCoverArt } from './utils/coverArt';
 import altRockIcon from './assets/images/alt_rock_icon_1785373882131.jpg';
-import { audioEngine } from './components/AudioEngine';
+import { audioEngine, RepeatMode } from './components/AudioEngine';
 import { NixieClock } from './components/NixieClock';
 import { NeonFrame } from './components/NeonFrame';
 import { VisualizerView } from './components/VisualizerView';
@@ -26,6 +26,10 @@ import {
   Upload,
   Mic,
   MicOff,
+  Shuffle,
+  Repeat,
+  Repeat1,
+  Activity,
 } from 'lucide-react';
 
 const DEFAULT_PREFS: AppPrefs = {
@@ -76,6 +80,8 @@ export const App: React.FC = () => {
     progress: -1,
   });
 
+  const [repeatMode, setRepeatMode] = useState<RepeatMode>(() => audioEngine.getRepeatMode());
+  const [isShuffle, setIsShuffle] = useState<boolean>(() => audioEngine.isShuffleActive());
   const [eqVisible, setEqVisible] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [playlistOpen, setPlaylistOpen] = useState(false);
@@ -87,9 +93,44 @@ export const App: React.FC = () => {
   const [textFlickerAlpha, setTextFlickerAlpha] = useState(1);
   const [userSeeking, setUserSeeking] = useState(false);
   const [seekProgress, setSeekProgress] = useState(0);
+  const [bassBeatEnergy, setBassBeatEnergy] = useState(0);
 
   const bgInputRef = useRef<HTMLInputElement | null>(null);
   const audioInputRef = useRef<HTMLInputElement | null>(null);
+
+  // Restore persistent audio tracks & history on mount
+  useEffect(() => {
+    audioEngine.restorePersistedTracks().then(() => {
+      const cur = audioEngine.getCurrentTrack();
+      if (cur) {
+        setPlaybackState((prev) => ({
+          ...prev,
+          title: cur.title,
+          artist: cur.artist,
+          album: cur.album,
+          durationMs: cur.durationMs,
+          positionMs: audioEngine.getPositionMs(),
+        }));
+      }
+      setRepeatMode(audioEngine.getRepeatMode());
+      setIsShuffle(audioEngine.isShuffleActive());
+    });
+  }, []);
+
+  // Live beat rhythm energy loop
+  useEffect(() => {
+    let animId: number;
+    const loop = () => {
+      if (audioEngine.isCurrentlyPlaying()) {
+        setBassBeatEnergy(audioEngine.getBassEnergy());
+      } else {
+        setBassBeatEnergy(0);
+      }
+      animId = requestAnimationFrame(loop);
+    };
+    animId = requestAnimationFrame(loop);
+    return () => cancelAnimationFrame(animId);
+  }, []);
 
   // Toggle browser native full screen mode for phone car mount
   const toggleNativeFullscreen = () => {
@@ -125,14 +166,18 @@ export const App: React.FC = () => {
       const track = audioEngine.getCurrentTrack();
       const playing = audioEngine.isCurrentlyPlaying();
       setIsMicActive(audioEngine.isMicrophoneActive());
-      setPlaybackState((prev) => ({
-        ...prev,
-        title: track.title,
-        artist: track.artist,
-        album: track.album,
-        durationMs: track.durationMs,
-        isPlaying: playing,
-      }));
+      setRepeatMode(audioEngine.getRepeatMode());
+      setIsShuffle(audioEngine.isShuffleActive());
+      if (track) {
+        setPlaybackState((prev) => ({
+          ...prev,
+          title: track.title,
+          artist: track.artist,
+          album: track.album,
+          durationMs: track.durationMs,
+          isPlaying: playing,
+        }));
+      }
     });
 
     const interval = setInterval(() => {
@@ -248,19 +293,20 @@ export const App: React.FC = () => {
         return {
           title,
           artist: 'Archivo Local',
-          album: 'Mi Lista',
+          album: 'Mi Música',
           url,
+          file,
         };
       });
 
       audioEngine.loadCustomTracks(tracksToLoad);
-      // Reset input value so same files can be re-uploaded if desired
       if (audioInputRef.current) audioInputRef.current.value = '';
     }
   };
 
   const currentPos = userSeeking ? seekProgress : playbackState.positionMs;
-  const progressPercent = playbackState.durationMs > 0 ? (currentPos / playbackState.durationMs) * 100 : 0;
+  const progressPercent =
+    playbackState.durationMs > 0 ? (currentPos / playbackState.durationMs) * 100 : 0;
 
   return (
     <div className="relative w-full h-[100dvh] min-h-[100dvh] max-h-[100dvh] bg-black text-white font-sans overflow-hidden flex flex-col select-none">
@@ -329,15 +375,14 @@ export const App: React.FC = () => {
         </div>
       ) : (
         /* SCREEN MODE 0 (Player) or MODE 2 (Mixed Player + Clock) */
-        <div className="relative z-10 flex-1 flex flex-col pt-4 pb-3 px-3 sm:pt-6 sm:pb-4 sm:px-6 md:px-8 landscape:p-2 landscape:px-3 overflow-hidden max-w-7xl mx-auto w-full min-h-0">
+        <div className="relative z-10 flex-1 flex flex-col pt-3 pb-2 px-3 sm:pt-5 sm:pb-3 sm:px-6 md:px-8 landscape:p-2 landscape:px-3 overflow-hidden max-w-7xl mx-auto w-full min-h-0">
           {/* Header Bar */}
           <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between pb-2 mb-2 sm:mb-3 border-b border-neutral-800/80 gap-2 shrink-0">
-            {/* Left: App Title & Bluetooth Device status */}
+            {/* Left: App Title, Bluetooth Status & Live Beat Rhythm Indicator */}
             <div className="flex items-center gap-2.5 truncate">
               <img
                 src={altRockIcon}
                 alt="Rock Icon"
-                referrerPolicy="no-referrer"
                 className="w-8 h-8 sm:w-9 sm:h-9 rounded-xl object-cover border border-amber-400/60 shadow-[0_0_12px_rgba(251,191,36,0.35)] shrink-0 transition-transform hover:scale-105"
               />
               <div className="flex flex-col min-w-0">
@@ -360,6 +405,22 @@ export const App: React.FC = () => {
                       playbackState.deviceName
                     )}
                   </span>
+
+                  {/* Live Beat Rhythm Indicator */}
+                  {playbackState.isPlaying && (
+                    <span
+                      className="hidden sm:inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-tech font-bold uppercase transition-all duration-75"
+                      style={{
+                        backgroundColor: `${prefs.accentColor}25`,
+                        color: prefs.accentColor,
+                        boxShadow: `0 0 ${8 + bassBeatEnergy * 12}px ${prefs.accentColor}60`,
+                        transform: `scale(${1 + bassBeatEnergy * 0.1})`,
+                      }}
+                    >
+                      <Activity className="w-2.5 h-2.5 animate-spin" style={{ animationDuration: '3s' }} />
+                      RITMO ON
+                    </span>
+                  )}
                 </div>
                 <span className="font-orbitron text-[10px] text-amber-400/80 font-bold tracking-wider">
                   BT PLAYER ROCK EDITION
@@ -377,7 +438,7 @@ export const App: React.FC = () => {
                     ? 'bg-amber-400 text-black border-amber-400 shadow-amber-400/20'
                     : 'bg-neutral-900 border-neutral-800 text-neutral-200 hover:text-white hover:bg-neutral-800 hover:border-neutral-700'
                 }`}
-                title="Ver Lista de Reproducción"
+                title="Ver Lista de Reproducción e Historial"
               >
                 <ListMusic className="w-4 h-4" />
                 <span className="hidden xs:inline">Lista</span>
@@ -390,7 +451,7 @@ export const App: React.FC = () => {
               <button
                 onClick={() => audioInputRef.current?.click()}
                 className="h-9 px-2.5 sm:px-3 rounded-lg bg-neutral-900 border border-neutral-800 text-neutral-200 hover:text-white hover:bg-neutral-800 hover:border-neutral-700 transition-all text-xs font-tech font-medium flex items-center gap-1.5 active:scale-95"
-                title="Cargar canciones o lista MP3"
+                title="Cargar canciones o lista MP3 (Se guardarán permanentemente)"
               >
                 <Upload className="w-4 h-4 text-amber-400" />
                 <span className="hidden sm:inline">Cargar MP3</span>
@@ -467,16 +528,23 @@ export const App: React.FC = () => {
           {/* Player Grid Body */}
           <div className="flex-1 grid grid-cols-1 landscape:grid-cols-12 lg:grid-cols-12 gap-3 sm:gap-4 lg:gap-6 items-stretch overflow-hidden min-h-0 py-1 sm:py-2">
             {/* Left Column: Cover Art, Metadata & Controls (5 cols) */}
-            <div className="landscape:col-span-5 lg:col-span-5 flex flex-col justify-between bg-neutral-950/80 border border-neutral-800/80 rounded-xl sm:rounded-2xl p-3 sm:p-5 landscape:p-2.5 backdrop-blur-md overflow-y-auto no-scrollbar landscape:overflow-hidden">
-              {/* Cover Art Image */}
+            <div className="landscape:col-span-5 lg:col-span-5 flex flex-col justify-between bg-neutral-950/80 border border-neutral-800/80 rounded-xl sm:rounded-2xl p-3 sm:p-4 landscape:p-2.5 backdrop-blur-md overflow-y-auto no-scrollbar landscape:overflow-hidden">
+              {/* Cover Art Image with Beat Rhythm Glow */}
               <div className="flex justify-center items-center my-auto py-1 landscape:py-0.5">
-                <div className="relative group">
+                <div
+                  className="relative group transition-transform duration-75"
+                  style={{
+                    transform: `scale(${1 + bassBeatEnergy * 0.05})`,
+                  }}
+                >
                   <img
                     src={coverArtUrl || undefined}
                     alt="Album Cover"
-                    className="w-28 h-28 xs:w-36 xs:h-36 sm:w-48 sm:h-48 md:w-56 md:h-56 landscape:w-20 landscape:h-20 sm:landscape:w-28 sm:landscape:h-28 max-h-[25vh] landscape:max-h-[30vh] rounded-xl sm:rounded-2xl object-cover shadow-2xl border border-white/10"
+                    className="w-28 h-28 xs:w-36 xs:h-36 sm:w-44 sm:h-44 md:w-52 md:h-52 landscape:w-20 landscape:h-20 sm:landscape:w-28 sm:landscape:h-28 max-h-[25vh] landscape:max-h-[30vh] rounded-xl sm:rounded-2xl object-cover shadow-2xl border border-white/10"
                     style={{
-                      boxShadow: prefs.maskNeon ? `0 0 25px ${prefs.accentColor}40` : undefined,
+                      boxShadow: `0 0 ${16 + Math.round(bassBeatEnergy * 30)}px ${
+                        prefs.maskNeon ? prefs.accentColor : '#FBBC05'
+                      }${Math.round(40 + bassBeatEnergy * 60).toString(16)}`,
                     }}
                   />
                   <div className="absolute inset-0 rounded-xl sm:rounded-2xl bg-black/40 opacity-0 group-hover:opacity-100 flex items-center justify-center transition-opacity cursor-pointer">
@@ -488,17 +556,17 @@ export const App: React.FC = () => {
                         }))
                       }
                       className="w-6 h-6 sm:w-8 sm:h-8 text-white"
-                      title="Change Cover Style"
+                      title="Cambiar Estilo de Portada"
                     />
                   </div>
                 </div>
               </div>
 
               {/* Track Info Marquee */}
-              <div className="text-center my-1.5 sm:my-3 landscape:my-1 overflow-hidden">
+              <div className="text-center my-1.5 sm:my-2 landscape:my-1 overflow-hidden">
                 <div className="overflow-hidden w-full relative">
                   <h1
-                    className="font-orbitron font-extrabold text-base sm:text-xl md:text-2xl landscape:text-xs sm:landscape:text-sm tracking-wide whitespace-nowrap animate-marquee"
+                    className="font-orbitron font-extrabold text-base sm:text-lg md:text-xl landscape:text-xs sm:landscape:text-sm tracking-wide whitespace-nowrap animate-marquee"
                     style={{
                       color: prefs.maskNeon ? prefs.accentColor : '#F2F4F8',
                       textShadow: prefs.maskNeon
@@ -511,7 +579,7 @@ export const App: React.FC = () => {
                 </div>
 
                 <h2
-                  className="font-tech text-xs sm:text-base landscape:text-[11px] font-medium mt-0.5"
+                  className="font-tech text-xs sm:text-sm landscape:text-[11px] font-medium mt-0.5"
                   style={{
                     color: prefs.accentColor,
                     textShadow: prefs.maskNeon
@@ -519,7 +587,7 @@ export const App: React.FC = () => {
                       : 'none',
                   }}
                 >
-                  {playbackState.artist || 'Waiting for audio...'}
+                  {playbackState.artist || 'Esperando audio...'}
                 </h2>
 
                 <p className="font-tech text-[10px] sm:text-xs text-neutral-400 mt-0.5 truncate">
@@ -562,35 +630,77 @@ export const App: React.FC = () => {
                 </div>
               </div>
 
-              {/* Playback Controls */}
-              <div className="flex items-center justify-center gap-4 sm:gap-6 mt-1 sm:mt-2 pt-1.5 sm:pt-2 border-t border-neutral-800/60">
+              {/* Playback Controls Toolbar with Shuffle & Repeat */}
+              <div className="flex items-center justify-between sm:justify-center gap-2 sm:gap-4 mt-1 sm:mt-2 pt-1.5 sm:pt-2 border-t border-neutral-800/60 w-full px-1">
+                {/* Shuffle Mode Toggle */}
                 <button
-                  onClick={handlePrev}
-                  className="p-2 sm:p-3 landscape:p-2 rounded-full bg-neutral-900 border border-neutral-800 text-neutral-200 hover:text-white hover:border-neutral-700 hover:scale-105 active:scale-95 transition-all"
+                  onClick={() => audioEngine.toggleShuffle()}
+                  className={`p-2 sm:p-2.5 rounded-full border transition-all active:scale-95 ${
+                    isShuffle
+                      ? 'bg-amber-400 text-black border-amber-400 shadow-md shadow-amber-400/30 ring-1 ring-amber-400/50 font-bold'
+                      : 'bg-neutral-900 border-neutral-800 text-neutral-400 hover:text-white hover:border-neutral-700'
+                  }`}
+                  title={isShuffle ? 'Mezcla / Shuffle: Activado' : 'Mezcla / Shuffle: Desactivado'}
                 >
-                  <SkipBack className="w-4 h-4 sm:w-5 sm:h-5 fill-current" />
+                  <Shuffle className="w-3.5 h-3.5 sm:w-4 sm:h-4" />
                 </button>
 
+                {/* Prev Button */}
+                <button
+                  onClick={handlePrev}
+                  className="p-2 sm:p-2.5 landscape:p-2 rounded-full bg-neutral-900 border border-neutral-800 text-neutral-200 hover:text-white hover:border-neutral-700 hover:scale-105 active:scale-95 transition-all"
+                  title="Canción anterior"
+                >
+                  <SkipBack className="w-4 h-4 sm:w-4.5 sm:h-4.5 fill-current" />
+                </button>
+
+                {/* Play / Pause Button */}
                 <button
                   onClick={handlePlayPause}
-                  className="p-3 sm:p-4 landscape:p-2.5 rounded-full text-black font-bold hover:scale-105 active:scale-95 transition-all shadow-lg"
+                  className="p-3 sm:p-3.5 landscape:p-2.5 rounded-full text-black font-bold hover:scale-105 active:scale-95 transition-all shadow-lg"
                   style={{
                     backgroundColor: prefs.accentColor,
                     boxShadow: `0 0 20px ${prefs.accentColor}80`,
                   }}
+                  title={playbackState.isPlaying ? 'Pausar' : 'Reproducir'}
                 >
                   {playbackState.isPlaying ? (
-                    <Pause className="w-5 h-5 sm:w-6 sm:h-6 fill-current" />
+                    <Pause className="w-5 h-5 sm:w-5.5 sm:h-5.5 fill-current" />
                   ) : (
-                    <Play className="w-5 h-5 sm:w-6 sm:h-6 fill-current ml-0.5" />
+                    <Play className="w-5 h-5 sm:w-5.5 sm:h-5.5 fill-current ml-0.5" />
                   )}
                 </button>
 
+                {/* Next Button */}
                 <button
                   onClick={handleNext}
-                  className="p-2 sm:p-3 landscape:p-2 rounded-full bg-neutral-900 border border-neutral-800 text-neutral-200 hover:text-white hover:border-neutral-700 hover:scale-105 active:scale-95 transition-all"
+                  className="p-2 sm:p-2.5 landscape:p-2 rounded-full bg-neutral-900 border border-neutral-800 text-neutral-200 hover:text-white hover:border-neutral-700 hover:scale-105 active:scale-95 transition-all"
+                  title="Siguiente canción"
                 >
-                  <SkipForward className="w-4 h-4 sm:w-5 sm:h-5 fill-current" />
+                  <SkipForward className="w-4 h-4 sm:w-4.5 sm:h-4.5 fill-current" />
+                </button>
+
+                {/* Repeat Mode Toggle (All -> One -> Off) */}
+                <button
+                  onClick={() => audioEngine.toggleRepeatMode()}
+                  className={`p-2 sm:p-2.5 rounded-full border transition-all active:scale-95 ${
+                    repeatMode !== 'off'
+                      ? 'bg-amber-400 text-black border-amber-400 shadow-md shadow-amber-400/30 ring-1 ring-amber-400/50 font-bold'
+                      : 'bg-neutral-900 border-neutral-800 text-neutral-400 hover:text-white hover:border-neutral-700'
+                  }`}
+                  title={
+                    repeatMode === 'all'
+                      ? 'Repetición: Toda la lista'
+                      : repeatMode === 'one'
+                      ? 'Repetición: 1 canción en bucle'
+                      : 'Repetición: Desactivada'
+                  }
+                >
+                  {repeatMode === 'one' ? (
+                    <Repeat1 className="w-3.5 h-3.5 sm:w-4 sm:h-4" />
+                  ) : (
+                    <Repeat className="w-3.5 h-3.5 sm:w-4 sm:h-4" />
+                  )}
                 </button>
               </div>
             </div>
@@ -652,20 +762,6 @@ export const App: React.FC = () => {
         </div>
       )}
 
-      {/* DEBUG PANEL OVERLAY */}
-      {prefs.showDebug && (
-        <div className="fixed bottom-2 left-2 z-50 bg-black/90 border border-amber-500/50 p-3 rounded-lg max-w-md max-h-40 overflow-y-auto font-tech text-[10px] text-amber-300">
-          <div className="font-bold border-b border-amber-500/30 pb-1 mb-1">
-            [BT RAW PROTOCOL DUMP LOG]
-          </div>
-          <div>[ACTION_MEDIA_INFO] EXTRA_MEDIA_NAME={playbackState.title}</div>
-          <div>[ACTION_MEDIA_INFO] EXTRA_MEDIA_ARTIST={playbackState.artist}</div>
-          <div>[ACTION_MEDIA_TIME] KEY_A2DP_CUR_TIME={playbackState.positionMs} ms</div>
-          <div>[ACTION_MEDIA_TIME] KEY_A2DP_TOTAL_TIME={playbackState.durationMs} ms</div>
-          <div>[ACTION_BT_MUSIC_PLAY] isPlaying={playbackState.isPlaying ? 'true' : 'false'}</div>
-        </div>
-      )}
-
       {/* PLAYLIST MODAL */}
       <PlaylistModal
         isOpen={playlistOpen}
@@ -673,9 +769,13 @@ export const App: React.FC = () => {
         playlist={audioEngine.getPlaylist()}
         currentTrackIndex={audioEngine.getCurrentTrackIndex()}
         isPlaying={playbackState.isPlaying}
+        repeatMode={repeatMode}
+        isShuffle={isShuffle}
         onSelectTrack={(idx) => audioEngine.playTrackIndex(idx)}
         onRemoveTrack={(idx) => audioEngine.removeTrack(idx)}
         onUploadClick={() => audioInputRef.current?.click()}
+        onToggleRepeat={() => audioEngine.toggleRepeatMode()}
+        onToggleShuffle={() => audioEngine.toggleShuffle()}
         accentColor={prefs.accentColor}
       />
 
@@ -685,10 +785,11 @@ export const App: React.FC = () => {
         onClose={() => setSettingsOpen(false)}
         prefs={prefs}
         onUpdatePrefs={updatePrefs}
-        onPickBackground={() => bgInputRef.current?.click()}
+        onSelectBgImage={() => bgInputRef.current?.click()}
       />
     </div>
   );
 };
 
 export default App;
+
